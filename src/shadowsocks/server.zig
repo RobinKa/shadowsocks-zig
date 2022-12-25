@@ -7,7 +7,6 @@ fn readContent(buffer: []const u8, content: []u8, encryptor: *Crypto.Encryptor) 
     const encrypted = buffer[0 .. buffer.len - 16];
     var tag: [16]u8 = undefined;
     std.mem.copy(u8, &tag, buffer[buffer.len - 16 .. buffer.len]);
-    std.debug.print("read content buffer.len={d}, encrypted.len={d}, tag.len={d}", .{ buffer.len, encrypted.len, tag.len });
     try encryptor.decrypt(content, encrypted, tag);
 }
 
@@ -71,10 +70,6 @@ fn handleWaitForFixed(state: *SharedClientState) !bool {
     state.request_decryptor = .{
         .key = session_subkey,
     };
-
-    // const file = try std.fs.cwd().createFile("data.bin", .{ .read = true });
-    // defer file.close();
-    // _ = try file.writeAll(state.recv_buffer.items);
 
     var decrypted: [11]u8 = undefined;
     try readContent(state.recv_buffer.items[32 .. 32 + 11 + 16], &decrypted, &state.request_decryptor);
@@ -198,6 +193,7 @@ fn handleWaitForPayload(state: *SharedClientState) !bool {
 
 fn handleResponse(state: *SharedClientState, received: []const u8) !void {
     var send_buffer = try std.ArrayList(u8).initCapacity(std.heap.page_allocator, 1024);
+    defer send_buffer.deinit();
 
     if (!state.sent_initial_response) {
         try send_buffer.appendSlice(&state.response_salt);
@@ -297,11 +293,23 @@ fn handleClient(socket: network.Socket, key: []const u8) !void {
 
         if (state.socket_set.isReadyRead(state.socket)) {
             const count = try state.socket.receive(&buffer);
+            std.debug.print("client sent {d} bytes\n", .{count});
+
+            if (count == 0) {
+                return;
+            }
+
             try state.recv_buffer.appendSlice(buffer[0..count]);
         }
 
         if (state.socket_set.isReadyRead(state.remote_socket)) {
             const count = try state.remote_socket.receive(&buffer);
+            std.debug.print("remote sent {d} bytes\n", .{count});
+
+            if (count == 0) {
+                return;
+            }
+
             try handleResponse(&state, buffer[0..count]);
         }
 
@@ -324,6 +332,12 @@ fn handleClient(socket: network.Socket, key: []const u8) !void {
     }
 }
 
+fn handleClientCatchAll(socket: network.Socket, key: []const u8) void {
+    handleClient(socket, key) catch |err| {
+        std.debug.print("client terminated because of error: {s}", .{@errorName(err)});
+    };
+}
+
 pub fn start(port: u16, key: []const u8) !void {
     var socket = try network.Socket.create(.ipv4, .tcp);
     defer socket.close();
@@ -332,7 +346,7 @@ pub fn start(port: u16, key: []const u8) !void {
 
     while (true) {
         var client = try socket.accept();
-        (try std.Thread.spawn(.{}, handleClient, .{ client, key })).detach();
+        (try std.Thread.spawn(.{}, handleClientCatchAll, .{ client, key })).detach();
         std.time.sleep(std.time.ns_per_us * 100);
     }
 }
