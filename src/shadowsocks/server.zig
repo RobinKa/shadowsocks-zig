@@ -47,6 +47,8 @@ const ShadowsocksError = error{
     ProtocolViolation,
     Unsupported,
     CantConnectToRemote,
+    RemoteDisconnected,
+    ClientDisconnected,
 };
 
 fn handleWaitForFixed(state: *SharedClientState) !bool {
@@ -141,9 +143,16 @@ fn handleWaitForVariable(state: *SharedClientState) !bool {
         },
     }
 
-    var sent: usize = 0;
-    while (sent < decoded_header.initial_payload.len) {
-        sent += try state.remote_socket.send(decoded_header.initial_payload[sent..]);
+    var total_sent: usize = 0;
+    while (total_sent < decoded_header.initial_payload.len) {
+        const sent = try state.remote_socket.send(decoded_header.initial_payload[total_sent..]);
+        std.debug.print("s->r {d}\n", .{sent});
+
+        if (sent == 0) {
+            return ShadowsocksError.ClientDisconnected;
+        }
+
+        total_sent += sent;
     }
 
     state.status = .wait_for_length;
@@ -179,9 +188,16 @@ fn handleWaitForPayload(state: *SharedClientState) !bool {
 
     try readContent(state.recv_buffer.items[0 .. state.length + 16], decrypted, &state.request_decryptor);
 
-    var sent: usize = 0;
-    while (sent < decrypted.len) {
-        sent += try state.remote_socket.send(decrypted[sent..]);
+    var total_sent: usize = 0;
+    while (total_sent < decrypted.len) {
+        const sent = try state.remote_socket.send(decrypted[total_sent..]);
+        std.debug.print("s->r {d}\n", .{sent});
+
+        if (sent == 0) {
+            return ShadowsocksError.ClientDisconnected;
+        }
+
+        total_sent += sent;
     }
 
     state.status = .wait_for_length;
@@ -236,9 +252,16 @@ fn handleResponse(state: *SharedClientState, received: []const u8) !void {
     try send_buffer.appendSlice(encrypted);
     try send_buffer.appendSlice(&tag);
 
-    var sent: usize = 0;
-    while (sent < send_buffer.items.len) {
-        sent += try state.socket.send(send_buffer.items[sent..]);
+    var total_sent: usize = 0;
+    while (total_sent < send_buffer.items.len) {
+        const sent = try state.socket.send(send_buffer.items[total_sent..]);
+        std.debug.print("s->r {d}\n", .{sent});
+
+        if (sent == 0) {
+            return ShadowsocksError.RemoteDisconnected;
+        }
+
+        total_sent += sent;
     }
 }
 
@@ -293,10 +316,10 @@ fn handleClient(socket: network.Socket, key: []const u8) !void {
 
         if (state.socket_set.isReadyRead(state.socket)) {
             const count = try state.socket.receive(&buffer);
-            std.debug.print("client sent {d} bytes\n", .{count});
+            std.debug.print("c->s {d}\n", .{count});
 
             if (count == 0) {
-                return;
+                return ShadowsocksError.ClientDisconnected;
             }
 
             try state.recv_buffer.appendSlice(buffer[0..count]);
@@ -304,10 +327,10 @@ fn handleClient(socket: network.Socket, key: []const u8) !void {
 
         if (state.socket_set.isReadyRead(state.remote_socket)) {
             const count = try state.remote_socket.receive(&buffer);
-            std.debug.print("remote sent {d} bytes\n", .{count});
+            std.debug.print("r->s {d}\n", .{count});
 
             if (count == 0) {
-                return;
+                return ShadowsocksError.RemoteDisconnected;
             }
 
             try handleResponse(&state, buffer[0..count]);
@@ -334,7 +357,7 @@ fn handleClient(socket: network.Socket, key: []const u8) !void {
 
 fn handleClientCatchAll(socket: network.Socket, key: []const u8) void {
     handleClient(socket, key) catch |err| {
-        std.debug.print("client terminated because of error: {s}", .{@errorName(err)});
+        std.debug.print("client terminated: {s}\n", .{@errorName(err)});
     };
 }
 
