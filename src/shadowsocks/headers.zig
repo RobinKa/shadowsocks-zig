@@ -32,9 +32,9 @@ pub const VariableLengthRequestHeader = struct {
 
     pub fn deinit(self: @This()) void {
         if (self.allocator != null) {
-            self.allocator.free(self.address);
-            self.allocator.free(self.padding);
-            self.allocator.free(self.initial_payload);
+            self.allocator.?.free(self.address);
+            self.allocator.?.free(self.padding);
+            self.allocator.?.free(self.initial_payload);
         }
     }
 
