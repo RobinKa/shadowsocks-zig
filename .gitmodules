@@ -1,4 +1,3 @@
 [submodule "libs/zig-network"]
 	path = libs/zig-network
 	url = https://github.com/RobinKa/zig-network
-	branch = master
