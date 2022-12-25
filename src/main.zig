@@ -21,14 +21,19 @@ pub fn main() !void {
     try network.init();
     defer network.deinit();
 
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    defer _ = gpa.deinit();
+
     const cfg = cfg: {
-        const config_path = try getConfigPath(std.heap.page_allocator);
-        defer std.heap.page_allocator.free(config_path);
-        break :cfg try config.configFromJsonFile(config_path);
+        const config_path = try getConfigPath(allocator);
+        defer allocator.free(config_path);
+
+        break :cfg try config.configFromJsonFile(config_path, allocator);
     };
 
     var key: [32]u8 = undefined;
     try std.base64.standard.Decoder.decode(&key, cfg.key);
 
-    try shadowsocks.Server.start(cfg.port, &key);
+    try shadowsocks.Server.start(cfg.port, &key, allocator);
 }

@@ -51,7 +51,7 @@ const ShadowsocksError = error{
     ClientDisconnected,
 };
 
-fn handleWaitForFixed(state: *SharedClientState) !bool {
+fn handleWaitForFixed(state: *SharedClientState, allocator: std.mem.Allocator) !bool {
     // Initial request needs to have at least the fixed length header
     if (state.recv_buffer.items.len < 32 + 11 + 16) {
         return ShadowsocksError.ProtocolViolation;
@@ -62,7 +62,7 @@ fn handleWaitForFixed(state: *SharedClientState) !bool {
     std.mem.copy(u8, &state.request_salt, state.recv_buffer.items[0..32]);
 
     {
-        var key_and_request_salt = std.ArrayList(u8).init(std.heap.page_allocator);
+        var key_and_request_salt = std.ArrayList(u8).init(allocator);
         defer key_and_request_salt.deinit();
         try key_and_request_salt.appendSlice(state.key);
         try key_and_request_salt.appendSlice(&state.request_salt);
@@ -88,19 +88,19 @@ fn handleWaitForFixed(state: *SharedClientState) !bool {
     return true;
 }
 
-fn handleWaitForVariable(state: *SharedClientState) !bool {
+fn handleWaitForVariable(state: *SharedClientState, allocator: std.mem.Allocator) !bool {
     if (state.recv_buffer.items.len < state.length + 16) {
         return false;
     }
 
-    var decrypted: []u8 = try std.heap.page_allocator.alloc(u8, state.length);
-    defer std.heap.page_allocator.free(decrypted);
+    var decrypted: []u8 = try allocator.alloc(u8, state.length);
+    defer allocator.free(decrypted);
 
     try readContent(state.recv_buffer.items[0 .. state.length + 16], decrypted, &state.request_decryptor);
 
     var stream = std.io.fixedBufferStream(decrypted);
     var reader = stream.reader();
-    const decoded_header = try Headers.VariableLengthRequestHeader.decode(reader, state.length, std.heap.page_allocator);
+    const decoded_header = try Headers.VariableLengthRequestHeader.decode(reader, state.length, allocator);
 
     switch (decoded_header.address_type) {
         1 => {
@@ -113,7 +113,7 @@ fn handleWaitForVariable(state: *SharedClientState) !bool {
         },
         3 => {
             const name = decoded_header.address;
-            const endpoint_list = try network.getEndpointList(std.heap.page_allocator, name, decoded_header.port);
+            const endpoint_list = try network.getEndpointList(allocator, name, decoded_header.port);
             defer endpoint_list.deinit();
 
             state.remote_socket.close();
@@ -178,13 +178,13 @@ fn handleWaitForLength(state: *SharedClientState) !bool {
     return true;
 }
 
-fn handleWaitForPayload(state: *SharedClientState) !bool {
+fn handleWaitForPayload(state: *SharedClientState, allocator: std.mem.Allocator) !bool {
     if (state.recv_buffer.items.len < state.length + 16) {
         return false;
     }
 
-    var decrypted: []u8 = try std.heap.page_allocator.alloc(u8, state.length);
-    defer std.heap.page_allocator.free(decrypted);
+    var decrypted: []u8 = try allocator.alloc(u8, state.length);
+    defer allocator.free(decrypted);
 
     try readContent(state.recv_buffer.items[0 .. state.length + 16], decrypted, &state.request_decryptor);
 
@@ -207,8 +207,8 @@ fn handleWaitForPayload(state: *SharedClientState) !bool {
     return true;
 }
 
-fn handleResponse(state: *SharedClientState, received: []const u8) !void {
-    var send_buffer = try std.ArrayList(u8).initCapacity(std.heap.page_allocator, 1024);
+fn handleResponse(state: *SharedClientState, received: []const u8, allocator: std.mem.Allocator) !void {
+    var send_buffer = try std.ArrayList(u8).initCapacity(allocator, 1024);
     defer send_buffer.deinit();
 
     if (!state.sent_initial_response) {
@@ -244,8 +244,8 @@ fn handleResponse(state: *SharedClientState, received: []const u8) !void {
         try send_buffer.appendSlice(&encrypted_and_tag);
     }
 
-    var encrypted: []u8 = try std.heap.page_allocator.alloc(u8, received.len);
-    defer std.heap.page_allocator.free(encrypted);
+    var encrypted: []u8 = try allocator.alloc(u8, received.len);
+    defer allocator.free(encrypted);
 
     var tag: [16]u8 = undefined;
     state.response_encryptor.encrypt(received, encrypted, &tag);
@@ -265,7 +265,7 @@ fn handleResponse(state: *SharedClientState, received: []const u8) !void {
     }
 }
 
-fn handleClient(socket: network.Socket, key: []const u8) !void {
+fn handleClient(socket: network.Socket, key: []const u8, allocator: std.mem.Allocator) !void {
     var response_salt: [32]u8 = undefined;
 
     {
@@ -277,14 +277,14 @@ fn handleClient(socket: network.Socket, key: []const u8) !void {
     var response_session_subkey: [32]u8 = undefined;
 
     {
-        var key_and_response_salt = std.ArrayList(u8).init(std.heap.page_allocator);
+        var key_and_response_salt = std.ArrayList(u8).init(allocator);
         defer key_and_response_salt.deinit();
         try key_and_response_salt.appendSlice(key);
         try key_and_response_salt.appendSlice(&response_salt);
         Crypto.deriveSessionSubkey(key_and_response_salt.items, &response_session_subkey);
     }
 
-    var socket_set = try network.SocketSet.init(std.heap.page_allocator);
+    var socket_set = try network.SocketSet.init(allocator);
 
     // TODO: if any of the trys fail, things aren't cleaned up properly.
     var state = SharedClientState{
@@ -296,7 +296,7 @@ fn handleClient(socket: network.Socket, key: []const u8) !void {
         .response_encryptor = .{
             .key = response_session_subkey,
         },
-        .recv_buffer = try std.ArrayList(u8).initCapacity(std.heap.page_allocator, 1024),
+        .recv_buffer = try std.ArrayList(u8).initCapacity(allocator, 1024),
     };
     defer state.deinit();
 
@@ -333,35 +333,35 @@ fn handleClient(socket: network.Socket, key: []const u8) !void {
                 return ShadowsocksError.RemoteDisconnected;
             }
 
-            try handleResponse(&state, buffer[0..count]);
+            try handleResponse(&state, buffer[0..count], allocator);
         }
 
         while (true) {
             switch (state.status) {
                 .wait_for_fixed => {
-                    if (!try handleWaitForFixed(&state)) break;
+                    if (!try handleWaitForFixed(&state, allocator)) break;
                 },
                 .wait_for_variable => {
-                    if (!try handleWaitForVariable(&state)) break;
+                    if (!try handleWaitForVariable(&state, allocator)) break;
                 },
                 .wait_for_length => {
                     if (!try handleWaitForLength(&state)) break;
                 },
                 .wait_for_payload => {
-                    if (!try handleWaitForPayload(&state)) break;
+                    if (!try handleWaitForPayload(&state, allocator)) break;
                 },
             }
         }
     }
 }
 
-fn handleClientCatchAll(socket: network.Socket, key: []const u8) void {
-    handleClient(socket, key) catch |err| {
+fn handleClientCatchAll(socket: network.Socket, key: []const u8, allocator: std.mem.Allocator) void {
+    handleClient(socket, key, allocator) catch |err| {
         std.debug.print("client terminated: {s}\n", .{@errorName(err)});
     };
 }
 
-pub fn start(port: u16, key: []const u8) !void {
+pub fn start(port: u16, key: []const u8, allocator: std.mem.Allocator) !void {
     var socket = try network.Socket.create(.ipv4, .tcp);
     defer socket.close();
     try socket.bindToPort(port);
@@ -369,7 +369,7 @@ pub fn start(port: u16, key: []const u8) !void {
 
     while (true) {
         var client = try socket.accept();
-        (try std.Thread.spawn(.{}, handleClientCatchAll, .{ client, key })).detach();
+        (try std.Thread.spawn(.{}, handleClientCatchAll, .{ client, key, allocator })).detach();
         std.time.sleep(std.time.ns_per_us * 100);
     }
 }

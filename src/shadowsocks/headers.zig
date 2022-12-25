@@ -32,9 +32,9 @@ pub const VariableLengthRequestHeader = struct {
 
     pub fn deinit(self: @This()) void {
         if (self.allocator != null) {
-            std.heap.page_allocator.free(self.address);
-            std.heap.page_allocator.free(self.padding);
-            std.heap.page_allocator.free(self.initial_payload);
+            self.allocator.free(self.address);
+            self.allocator.free(self.padding);
+            self.allocator.free(self.initial_payload);
         }
     }
 
@@ -181,7 +181,7 @@ test "decode VariableLengthRequestHeader" {
     var stream = std.io.fixedBufferStream(&buffer);
     var reader = stream.reader();
 
-    const header = try VariableLengthRequestHeader.decode(reader, buffer.len - 3, std.heap.page_allocator);
+    const header = try VariableLengthRequestHeader.decode(reader, buffer.len - 3, std.testing.allocator);
     defer header.deinit();
 
     try std.testing.expectEqual(@as(usize, 16), reader.context.pos);
