@@ -1,0 +1,4 @@
+{
+  "port": 5667,
+  "key": "base64 encoded 32 byte key"
+}

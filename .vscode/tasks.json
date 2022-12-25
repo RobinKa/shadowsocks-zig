@@ -1,0 +1,45 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build zig",
+            "type": "shell",
+            "command": "zig build",
+            "group": "build",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build shadowsocks headers test",
+            "type": "shell",
+            "command": "zig test -femit-bin=zig-out/bin/shadowsocks-headers-test src/shadowsocks/headers.zig",
+            "group": "build",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build shadowsocks crypto test",
+            "type": "shell",
+            "command": "zig test -femit-bin=zig-out/bin/shadowsocks-crypto-test src/shadowsocks/crypto.zig",
+            "group": "build",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build shadowsocks test",
+            "type": "shell",
+            "command": "zig test -femit-bin=zig-out/bin/shadowsocks-test src/shadowsocks.zig",
+            "group": "build",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+    ]
+}
