@@ -59,7 +59,7 @@ pub const VariableLengthRequestHeader = struct {
                 else => unreachable,
             }
         };
-        
+
         const port = try reader.readIntBig(u16);
 
         const padding_length = try reader.readIntBig(u16);
@@ -84,6 +84,7 @@ pub const VariableLengthRequestHeader = struct {
     pub fn encode(self: @This(), writer: anytype) !void {
         try writer.writeIntBig(u8, self.address_type);
         _ = try writer.write(self.address);
+        try writer.writeIntBig(u16, self.port);
         try writer.writeIntBig(u16, self.padding_length);
         _ = try writer.write(self.padding);
         _ = try writer.write(self.initial_payload);
@@ -150,13 +151,14 @@ test "decode FixedLengthRequestHeader" {
 }
 
 test "encode VariableLengthRequestHeader" {
-    var address = [_]u8{ 1, 2, 3, 4, 5, 6 };
+    var address = [_]u8{ 1, 2, 3, 4 };
     var padding = [_]u8{ 0, 0, 0, 0 };
     var initial_payload = [_]u8{ 5, 6, 7 };
 
     const header = VariableLengthRequestHeader{
         .address_type = 1,
         .address = &address,
+        .port = 56,
         .padding_length = 4,
         .padding = &padding,
         .initial_payload = &initial_payload,
@@ -169,12 +171,13 @@ test "encode VariableLengthRequestHeader" {
 
     try header.encode(writer);
 
-    try std.testing.expectEqual(@as(usize, 16), stream.pos);
-    try std.testing.expectEqualSlices(u8, &.{ 1, 1, 2, 3, 4, 5, 6, 0, 4, 0, 0, 0, 0, 5, 6, 7 }, buffer[0..16]);
+    const correct = [_]u8{ 1, 1, 2, 3, 4, 0, 56, 0, 4, 0, 0, 0, 0, 5, 6, 7 };
+    try std.testing.expectEqual(correct.len, stream.pos);
+    try std.testing.expectEqualSlices(u8, &correct, buffer[0..correct.len]);
 }
 
 test "decode VariableLengthRequestHeader" {
-    var buffer = [_]u8{ 1, 1, 2, 3, 4, 5, 6, 0, 4, 0, 0, 0, 0, 5, 6, 7, 9, 9, 9 };
+    var buffer = [_]u8{ 1, 1, 2, 3, 4, 0, 56, 0, 4, 0, 0, 0, 0, 5, 6, 7, 9, 9, 9 };
     var stream = std.io.fixedBufferStream(&buffer);
     var reader = stream.reader();
 
@@ -183,7 +186,8 @@ test "decode VariableLengthRequestHeader" {
 
     try std.testing.expectEqual(@as(usize, 16), reader.context.pos);
     try std.testing.expectEqual(@as(u8, 1), header.address_type);
-    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4, 5, 6 }, header.address);
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4 }, header.address);
+    try std.testing.expectEqual(@as(u16, 56), header.port);
     try std.testing.expectEqual(@as(u16, 4), header.padding_length);
     try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0 }, header.padding);
     try std.testing.expectEqualSlices(u8, &.{ 5, 6, 7 }, header.initial_payload);
