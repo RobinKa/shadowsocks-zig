@@ -6,7 +6,7 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/zig-out/bin/main.exe",
-            "args": [],
+            "args": ["../../configs/config.json"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/zig-out/bin",
             "symbolSearchPath": "${workspaceFolder}/zig-out/bin",
