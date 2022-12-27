@@ -241,6 +241,7 @@ pub const Client = struct {
         while (true) {
             var buffer: [1024]u8 = undefined;
             var received = try self.socket.receive(&buffer);
+            std.debug.print("s->c {d}\n", .{received});
             try self.recv_buffer.appendSlice(buffer[0..received]);
 
             payload_size = try self.getPacket(data);
@@ -281,7 +282,7 @@ pub const Client = struct {
         var total_sent: usize = 0;
         while (total_sent < send_buffer.items.len) {
             const sent = try self.socket.send(send_buffer.items[total_sent..]);
-            std.debug.print("s->c {d}\n", .{sent});
+            std.debug.print("c->s {d}\n", .{sent});
             total_sent += sent;
         }
 
