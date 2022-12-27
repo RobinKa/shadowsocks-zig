@@ -30,10 +30,11 @@ pub fn build(b: *std.build.Builder) void {
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
 
-    const shadowsocks_tests = b.addTest("src/shadowsocks.zig");
+    const shadowsocks_tests = b.addTestExe("shadowsocks-test", "src/shadowsocks.zig");
     shadowsocks_tests.setTarget(target);
     shadowsocks_tests.setBuildMode(mode);
     shadowsocks_tests.addPackagePath("network", "libs/zig-network/network.zig");
+    shadowsocks_tests.install();
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&exe_tests.step);

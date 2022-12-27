@@ -83,6 +83,11 @@ pub const VariableLengthRequestHeader = struct {
 
     pub fn encode(self: @This(), writer: anytype) !void {
         try writer.writeIntBig(u8, self.address_type);
+
+        if (self.address_type == 3) {
+            try writer.writeIntBig(u8, @intCast(u8, self.address.len));
+        }
+
         _ = try writer.write(self.address);
         try writer.writeIntBig(u16, self.port);
         try writer.writeIntBig(u16, self.padding_length);

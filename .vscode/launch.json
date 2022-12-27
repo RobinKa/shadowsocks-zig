@@ -18,42 +18,10 @@
             "preLaunchTask": "Build zig"
         },
         {
-            "name": "Debug shadowsocks headers test",
-            "type": "cppvsdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/zig-out/bin/shadowsocks-headers-test",
-            "args": [],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}/zig-out/bin",
-            "symbolSearchPath": "${workspaceFolder}/zig-out/bin",
-            "environment": [],
-            "externalConsole": false,
-            "logging": {
-                "moduleLoad": false
-            },
-            "preLaunchTask": "Build shadowsocks headers test"
-        },
-        {
-            "name": "Debug shadowsocks crypto test",
-            "type": "cppvsdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/zig-out/bin/shadowsocks-crypto-test",
-            "args": [],
-            "stopAtEntry": false,
-            "cwd": "${workspaceFolder}/zig-out/bin",
-            "symbolSearchPath": "${workspaceFolder}/zig-out/bin",
-            "environment": [],
-            "externalConsole": false,
-            "logging": {
-                "moduleLoad": false
-            },
-            "preLaunchTask": "Build shadowsocks crypto test"
-        },
-        {
             "name": "Debug shadowsocks test",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/zig-out/bin/shadowsocks-test",
+            "program": "${workspaceFolder}/zig-out/bin/shadowsocks-test.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/zig-out/bin",

@@ -1,9 +1,14 @@
 pub const Crypto = @import("shadowsocks/crypto.zig");
 pub const Headers = @import("shadowsocks/headers.zig");
 pub const Server = @import("shadowsocks/server.zig");
+pub const Client = @import("shadowsocks/client.zig");
 
 const std = @import("std");
 const network = @import("network");
+
+test {
+    _ = @import("shadowsocks/tests.zig");
+}
 
 test "FixedLengthRequestHeader - derive, encode, encrypt, decrypt, decode" {
     var session_subkey: [32]u8 = undefined;
