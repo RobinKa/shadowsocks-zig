@@ -1,9 +1,33 @@
 const std = @import("std");
+const network = @import("network");
 const shadowsocks_client = @import("client.zig");
 const shadowsocks_server = @import("server.zig");
 
 fn runProxyServer(port: u16, key: []const u8) !void {
     try shadowsocks_server.start(port, key, std.heap.page_allocator);
+}
+
+fn waitCanConnect(port: u16) !void {
+    var socket = try network.Socket.create(.ipv4, .tcp);
+    defer socket.close();
+
+    var retries: u8 = 0;
+    while (true) {
+        socket.connect(.{
+            .address = .{ .ipv4 = .{ .value = .{ 127, 0, 0, 1 } } },
+            .port = port,
+        }) catch {
+            retries += 1;
+            if (retries >= 5) {
+                return error.CantConnectToRemote;
+            }
+            std.debug.print("Failed to connect on attempt {d}, retrying", .{retries});
+            std.time.sleep(std.time.ns_per_s);
+            continue;
+        };
+
+        break;
+    }
 }
 
 test "client send initial payload" {
@@ -12,6 +36,7 @@ test "client send initial payload" {
     try std.base64.standard.Decoder.decode(&key, "AcxUIVEsMN7a5bk2swV8uCFb9MGkY5pZumaStQ4CVKc=");
 
     _ = try std.Thread.spawn(.{}, runProxyServer, .{ port, &key });
+    try waitCanConnect(port);
 
     const initial_payload = "GET / HTTP/1.1\r\nHost: eu.httpbin.org\r\n\r\n";
 
@@ -37,6 +62,7 @@ test "client send non-initial payload" {
     try std.base64.standard.Decoder.decode(&key, "AcxUIVEsMN7a5bk2swV8uCFb9MGkY5pZumaStQ4CVKc=");
 
     _ = try std.Thread.spawn(.{}, runProxyServer, .{ port, &key });
+    try waitCanConnect(port);
 
     var client = try shadowsocks_client.Client.connect(.{ 127, 0, 0, 1 }, port, "eu.httpbin.org", 80, key, &.{});
 
