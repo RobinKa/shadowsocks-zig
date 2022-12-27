@@ -249,4 +249,42 @@ pub const Client = struct {
             }
         }
     }
+
+    pub fn send(self: *@This(), data: []const u8) !usize {
+        var send_buffer = try std.ArrayList(u8).initCapacity(std.heap.page_allocator, 2 + 16 + data.len + 16);
+        defer send_buffer.deinit();
+
+        {
+            var encoded_length: [2]u8 = undefined;
+            std.mem.writeIntBig(u16, &encoded_length, @intCast(u16, data.len));
+
+            var encrypted_length: [2]u8 = undefined;
+            var tag: [16]u8 = undefined;
+
+            self.request_encryptor.encrypt(&encoded_length, &encrypted_length, &tag);
+
+            try send_buffer.appendSlice(&encrypted_length);
+            try send_buffer.appendSlice(&tag);
+        }
+
+        {
+            var encrypted_data: []u8 = try std.heap.page_allocator.alloc(u8, data.len);
+            defer std.heap.page_allocator.free(encrypted_data);
+
+            var tag: [16]u8 = undefined;
+            self.request_encryptor.encrypt(data, encrypted_data, &tag);
+
+            try send_buffer.appendSlice(encrypted_data);
+            try send_buffer.appendSlice(&tag);
+        }
+
+        var total_sent: usize = 0;
+        while (total_sent < send_buffer.items.len) {
+            const sent = try self.socket.send(send_buffer.items[total_sent..]);
+            std.debug.print("s->c {d}\n", .{sent});
+            total_sent += sent;
+        }
+
+        return data.len;
+    }
 };
