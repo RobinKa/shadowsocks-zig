@@ -37,3 +37,7 @@ pub fn main() !void {
 
     try shadowsocks.Server.start(cfg.port, &key, allocator);
 }
+
+test {
+    _ = @import("shadowsocks.zig");
+}
