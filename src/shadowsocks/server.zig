@@ -44,7 +44,8 @@ const SharedClientState = struct {
 };
 
 const ShadowsocksError = error{
-    ProtocolViolation,
+    InitialRequestTooSmall,
+    UnknownAddressType,
     Unsupported,
     CantConnectToRemote,
     RemoteDisconnected,
@@ -54,7 +55,7 @@ const ShadowsocksError = error{
 fn handleWaitForFixed(state: *SharedClientState, allocator: std.mem.Allocator) !bool {
     // Initial request needs to have at least the fixed length header
     if (state.recv_buffer.items.len < 32 + 11 + 16) {
-        return ShadowsocksError.ProtocolViolation;
+        return ShadowsocksError.InitialRequestTooSmall;
     }
 
     var session_subkey: [32]u8 = undefined;
@@ -139,9 +140,14 @@ fn handleWaitForVariable(state: *SharedClientState, allocator: std.mem.Allocator
             return ShadowsocksError.Unsupported;
         },
         else => {
-            return ShadowsocksError.ProtocolViolation;
+            return ShadowsocksError.UnknownAddressType;
         },
     }
+
+    try state.socket_set.add(state.remote_socket, .{
+        .read = true,
+        .write = false,
+    });
 
     var total_sent: usize = 0;
     while (total_sent < decoded_header.initial_payload.len) {
@@ -305,11 +311,6 @@ fn handleClient(socket: network.Socket, key: []const u8, allocator: std.mem.Allo
         .write = false,
     });
 
-    try state.socket_set.add(state.remote_socket, .{
-        .read = true,
-        .write = false,
-    });
-
     var buffer: [1024]u8 = undefined;
     while (true) {
         _ = try network.waitForSocketEvent(state.socket_set, null);
@@ -367,9 +368,15 @@ pub fn start(port: u16, key: []const u8, allocator: std.mem.Allocator) !void {
     try socket.bindToPort(port);
     try socket.listen();
 
+    std.debug.print("Listening on port {d}\n", .{port});
+
     while (true) {
         var client = try socket.accept();
+        std.debug.print("Accepted new client\n", .{});
+
         (try std.Thread.spawn(.{}, handleClientCatchAll, .{ client, key, allocator })).detach();
         std.time.sleep(std.time.ns_per_us * 100);
     }
+
+    std.debug.print("Done", .{});
 }
