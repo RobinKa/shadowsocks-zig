@@ -5,12 +5,11 @@ RUN apk update && apk add zig --repository=http://dl-cdn.alpinelinux.org/alpine/
 COPY build.zig ./
 COPY ./libs ./libs
 COPY ./src ./src
-RUN zig build
+RUN zig build -Drelease-safe
 
 FROM alpine:3.17
 
 WORKDIR /app
 COPY --from=builder /app/zig-out/bin/main .
-COPY ./configs/config.json .
 
 ENTRYPOINT [ "/app/main", "config.json" ]
