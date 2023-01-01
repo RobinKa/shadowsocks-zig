@@ -8,6 +8,7 @@ const network = @import("network");
 
 test {
     _ = @import("shadowsocks/tests.zig");
+    _ = @import("shadowsocks/salts.zig");
 }
 
 test "FixedLengthRequestHeader - derive, encode, encrypt, decrypt, decode" {

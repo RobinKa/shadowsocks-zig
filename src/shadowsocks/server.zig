@@ -2,6 +2,7 @@ const std = @import("std");
 const network = @import("network");
 const Crypto = @import("crypto.zig");
 const Headers = @import("headers.zig");
+const Salts = @import("salts.zig");
 
 fn readContent(buffer: []const u8, content: []u8, encryptor: *Crypto.Encryptor) !void {
     const encrypted = buffer[0 .. buffer.len - 16];
@@ -17,7 +18,7 @@ const ClientStatus = enum {
     wait_for_payload,
 };
 
-const SharedClientState = struct {
+const ClientState = struct {
     status: ClientStatus = .wait_for_fixed,
 
     socket: network.Socket,
@@ -43,6 +44,22 @@ const SharedClientState = struct {
     }
 };
 
+const ServerState = struct {
+    key: []const u8,
+    request_salt_cache: Salts.SaltCache,
+
+    fn init(key: []const u8, allocator: std.mem.Allocator) !@This() {
+        return .{
+            .key = key,
+            .request_salt_cache = try Salts.SaltCache.init(allocator),
+        };
+    }
+
+    fn deinit(self: *@This()) void {
+        self.request_salt_cache.deinit();
+    }
+};
+
 const ShadowsocksError = error{
     InitialRequestTooSmall,
     UnknownAddressType,
@@ -50,9 +67,10 @@ const ShadowsocksError = error{
     CantConnectToRemote,
     RemoteDisconnected,
     ClientDisconnected,
+    DuplicateSalt,
 };
 
-fn handleWaitForFixed(state: *SharedClientState, allocator: std.mem.Allocator) !bool {
+fn handleWaitForFixed(state: *ClientState, server_state: *ServerState, allocator: std.mem.Allocator) !bool {
     // Initial request needs to have at least the fixed length header
     if (state.recv_buffer.items.len < 32 + 11 + 16) {
         return ShadowsocksError.InitialRequestTooSmall;
@@ -61,6 +79,15 @@ fn handleWaitForFixed(state: *SharedClientState, allocator: std.mem.Allocator) !
     var session_subkey: [32]u8 = undefined;
 
     std.mem.copy(u8, &state.request_salt, state.recv_buffer.items[0..32]);
+
+    // Detect replay attacks with duplicate salts
+    const time: u64 = @intCast(u64, std.time.milliTimestamp());
+    server_state.request_salt_cache.removeSaltsAfterTime(time + 60 * std.time.ms_per_s);
+
+    
+    if (!try server_state.request_salt_cache.maybeAddRequestSalt(&state.request_salt, time)) {
+        return ShadowsocksError.DuplicateSalt;
+    }
 
     {
         var key_and_request_salt = std.ArrayList(u8).init(allocator);
@@ -89,7 +116,7 @@ fn handleWaitForFixed(state: *SharedClientState, allocator: std.mem.Allocator) !
     return true;
 }
 
-fn handleWaitForVariable(state: *SharedClientState, allocator: std.mem.Allocator) !bool {
+fn handleWaitForVariable(state: *ClientState, allocator: std.mem.Allocator) !bool {
     if (state.recv_buffer.items.len < state.length + 16) {
         return false;
     }
@@ -168,7 +195,7 @@ fn handleWaitForVariable(state: *SharedClientState, allocator: std.mem.Allocator
     return true;
 }
 
-fn handleWaitForLength(state: *SharedClientState) !bool {
+fn handleWaitForLength(state: *ClientState) !bool {
     if (state.recv_buffer.items.len < 18) {
         return false;
     }
@@ -184,7 +211,7 @@ fn handleWaitForLength(state: *SharedClientState) !bool {
     return true;
 }
 
-fn handleWaitForPayload(state: *SharedClientState, allocator: std.mem.Allocator) !bool {
+fn handleWaitForPayload(state: *ClientState, allocator: std.mem.Allocator) !bool {
     if (state.recv_buffer.items.len < state.length + 16) {
         return false;
     }
@@ -213,7 +240,7 @@ fn handleWaitForPayload(state: *SharedClientState, allocator: std.mem.Allocator)
     return true;
 }
 
-fn handleResponse(state: *SharedClientState, received: []const u8, allocator: std.mem.Allocator) !void {
+fn handleResponse(state: *ClientState, received: []const u8, allocator: std.mem.Allocator) !void {
     var send_buffer = try std.ArrayList(u8).initCapacity(allocator, 1024);
     defer send_buffer.deinit();
 
@@ -271,7 +298,7 @@ fn handleResponse(state: *SharedClientState, received: []const u8, allocator: st
     }
 }
 
-fn handleClient(socket: network.Socket, key: []const u8, allocator: std.mem.Allocator) !void {
+fn handleClient(socket: network.Socket, server_state: *ServerState, allocator: std.mem.Allocator) !void {
     var response_salt: [32]u8 = undefined;
 
     {
@@ -285,7 +312,7 @@ fn handleClient(socket: network.Socket, key: []const u8, allocator: std.mem.Allo
     {
         var key_and_response_salt = std.ArrayList(u8).init(allocator);
         defer key_and_response_salt.deinit();
-        try key_and_response_salt.appendSlice(key);
+        try key_and_response_salt.appendSlice(server_state.key);
         try key_and_response_salt.appendSlice(&response_salt);
         Crypto.deriveSessionSubkey(key_and_response_salt.items, &response_session_subkey);
     }
@@ -293,11 +320,11 @@ fn handleClient(socket: network.Socket, key: []const u8, allocator: std.mem.Allo
     var socket_set = try network.SocketSet.init(allocator);
 
     // TODO: if any of the trys fail, things aren't cleaned up properly.
-    var state = SharedClientState{
+    var state = ClientState{
         .socket = socket,
         .remote_socket = try network.Socket.create(.ipv4, .tcp),
         .socket_set = &socket_set,
-        .key = key[0..32],
+        .key = server_state.key[0..32],
         .response_salt = response_salt,
         .response_encryptor = .{
             .key = response_session_subkey,
@@ -340,7 +367,7 @@ fn handleClient(socket: network.Socket, key: []const u8, allocator: std.mem.Allo
         while (true) {
             switch (state.status) {
                 .wait_for_fixed => {
-                    if (!try handleWaitForFixed(&state, allocator)) break;
+                    if (!try handleWaitForFixed(&state, server_state, allocator)) break;
                 },
                 .wait_for_variable => {
                     if (!try handleWaitForVariable(&state, allocator)) break;
@@ -356,8 +383,8 @@ fn handleClient(socket: network.Socket, key: []const u8, allocator: std.mem.Allo
     }
 }
 
-fn handleClientCatchAll(socket: network.Socket, key: []const u8, allocator: std.mem.Allocator) void {
-    handleClient(socket, key, allocator) catch |err| {
+fn handleClientCatchAll(socket: network.Socket, server_state: *ServerState, allocator: std.mem.Allocator) void {
+    handleClient(socket, server_state, allocator) catch |err| {
         std.debug.print("client terminated: {s}\n", .{@errorName(err)});
     };
 }
@@ -368,13 +395,16 @@ pub fn start(port: u16, key: []const u8, allocator: std.mem.Allocator) !void {
     try socket.bindToPort(port);
     try socket.listen();
 
+    var server_state = try ServerState.init(key, allocator);
+    defer server_state.deinit();
+
     std.debug.print("Listening on port {d}\n", .{port});
 
     while (true) {
         var client = try socket.accept();
         std.debug.print("Accepted new client\n", .{});
 
-        (try std.Thread.spawn(.{}, handleClientCatchAll, .{ client, key, allocator })).detach();
+        (try std.Thread.spawn(.{}, handleClientCatchAll, .{ client, &server_state, allocator })).detach();
         std.time.sleep(std.time.ns_per_us * 100);
     }
 
