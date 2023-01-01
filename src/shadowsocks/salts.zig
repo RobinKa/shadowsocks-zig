@@ -35,7 +35,7 @@ pub const SaltCache = struct {
     pub fn deinit(self: *@This()) void {
         while (self.request_salts.count() > 0) {
             var salt = self.request_salts.remove();
-            self.allocator.free(salt);
+            self.allocator.free(salt.salt);
         }
 
         self.request_salts.deinit();
@@ -44,6 +44,7 @@ pub const SaltCache = struct {
 
     pub fn maybeAddRequestSalt(self: *@This(), salt: []const u8, timestamp: u64) !bool {
         var salt_copy = try self.allocator.dupe(u8, salt);
+        errdefer self.allocator.free(salt_copy);
 
         self.request_salts_mutex.lock();
         defer self.request_salts_mutex.unlock();
@@ -51,6 +52,7 @@ pub const SaltCache = struct {
         var kv = try self.request_salts_set.getOrPut(salt_copy);
 
         if (kv.found_existing) {
+            self.allocator.free(salt_copy);
             return false;
         }
 
