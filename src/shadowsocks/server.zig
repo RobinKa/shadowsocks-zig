@@ -68,6 +68,7 @@ const ShadowsocksError = error{
     RemoteDisconnected,
     ClientDisconnected,
     DuplicateSalt,
+    NoInitialPayloadOrPadding,
 };
 
 fn handleWaitForFixed(state: *ClientState, server_state: *ServerState, allocator: std.mem.Allocator) !bool {
@@ -128,6 +129,10 @@ fn handleWaitForVariable(state: *ClientState, allocator: std.mem.Allocator) !boo
     var stream = std.io.fixedBufferStream(decrypted);
     var reader = stream.reader();
     const decoded_header = try Headers.VariableLengthRequestHeader.decode(reader, state.length, allocator);
+
+    if (decoded_header.padding.len == 0 and decoded_header.initial_payload.len == 0) {
+        return ShadowsocksError.NoInitialPayloadOrPadding;
+    }
 
     switch (decoded_header.address_type) {
         1 => {
