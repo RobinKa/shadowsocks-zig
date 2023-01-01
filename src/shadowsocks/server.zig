@@ -314,7 +314,7 @@ fn handleResponse(state: *ClientState, received: []const u8, allocator: std.mem.
 }
 
 fn closeSocketNoLinger(socket: network.Socket) void {
-    const SO_LINGER = 0x00000800;
+    const SO_LINGER = 0x0080;
 
     const Linger = extern struct {
         l_onoff: u16,
