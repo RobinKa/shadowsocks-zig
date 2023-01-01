@@ -174,7 +174,12 @@ fn handleWaitForVariable(state: *ClientState, allocator: std.mem.Allocator) !boo
             }
         },
         4 => {
-            return ShadowsocksError.Unsupported;
+            const address = decoded_header.address[0..16];
+
+            try state.remote_socket.connect(.{
+                .address = .{ .ipv6 = network.Address.IPv6.init(address.*, 0) },
+                .port = decoded_header.port,
+            });
         },
         else => {
             return ShadowsocksError.UnknownAddressType;

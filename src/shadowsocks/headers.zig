@@ -55,7 +55,11 @@ pub const VariableLengthRequestHeader = struct {
                     try reader.readNoEof(addr);
                     break :add addr;
                 },
-                // TODO: 0x04 ipv6
+                4 => {
+                    var addr: []u8 = try allocator.alloc(u8, 16);
+                    try reader.readNoEof(addr);
+                    break :add addr;
+                },
                 else => unreachable,
             }
         };
@@ -195,6 +199,23 @@ test "decode VariableLengthRequestHeader" {
     try std.testing.expectEqual(@as(usize, 16), reader.context.pos);
     try std.testing.expectEqual(@as(u8, 1), header.address_type);
     try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4 }, header.address);
+    try std.testing.expectEqual(@as(u16, 56), header.port);
+    try std.testing.expectEqual(@as(u16, 4), header.padding_length);
+    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0 }, header.padding);
+    try std.testing.expectEqualSlices(u8, &.{ 5, 6, 7 }, header.initial_payload);
+}
+
+test "decode VariableLengthRequestHeader IPv6" {
+    var buffer = [_]u8{ 4, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 0, 56, 0, 4, 0, 0, 0, 0, 5, 6, 7, 9, 9, 9 };
+    var stream = std.io.fixedBufferStream(&buffer);
+    var reader = stream.reader();
+
+    const header = try VariableLengthRequestHeader.decode(reader, buffer.len - 3, std.testing.allocator);
+    defer header.deinit();
+
+    try std.testing.expectEqual(@as(usize, 16), reader.context.pos);
+    try std.testing.expectEqual(@as(u8, 4), header.address_type);
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }, header.address);
     try std.testing.expectEqual(@as(u16, 56), header.port);
     try std.testing.expectEqual(@as(u16, 4), header.padding_length);
     try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0 }, header.padding);
