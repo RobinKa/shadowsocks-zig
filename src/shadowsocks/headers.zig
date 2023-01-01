@@ -59,15 +59,18 @@ pub const VariableLengthRequestHeader = struct {
                 else => unreachable,
             }
         };
+        errdefer allocator.free(address);
 
         const port = try reader.readIntBig(u16);
 
         const padding_length = try reader.readIntBig(u16);
         var padding: []u8 = try allocator.alloc(u8, padding_length);
+        errdefer allocator.free(padding);
         try reader.readNoEof(padding[0..padding_length]);
 
         const remaining_length = length - (reader.context.pos - start_pos);
         var initial_payload = try allocator.alloc(u8, remaining_length);
+        errdefer allocator.free(initial_payload);
         try reader.readNoEof(initial_payload[0..remaining_length]);
 
         return .{
