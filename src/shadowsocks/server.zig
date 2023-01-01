@@ -69,6 +69,7 @@ const ShadowsocksError = error{
     ClientDisconnected,
     DuplicateSalt,
     NoInitialPayloadOrPadding,
+    TimestampTooOld,
 };
 
 fn handleWaitForFixed(state: *ClientState, server_state: *ServerState, allocator: std.mem.Allocator) !bool {
@@ -107,6 +108,11 @@ fn handleWaitForFixed(state: *ClientState, server_state: *ServerState, allocator
     var stream = std.io.fixedBufferStream(&decrypted);
     var reader = stream.reader();
     const decoded_header = try Headers.FixedLengthRequestHeader.decode(reader);
+
+    // Detect replay attacks by checking for old timestamps
+    if (@intCast(u64, std.time.timestamp()) > decoded_header.timestamp + 30) {
+        return ShadowsocksError.TimestampTooOld;
+    }
 
     state.length = decoded_header.length;
     state.status = .wait_for_variable;
@@ -253,7 +259,7 @@ fn handleResponse(state: *ClientState, received: []const u8, allocator: std.mem.
 
         const header: Headers.FixedLengthResponseHeader = .{
             .type = 1,
-            .timestamp = @intCast(u64, std.time.milliTimestamp()) / 1000,
+            .timestamp = @intCast(u64, std.time.timestamp()),
             .salt = state.request_salt,
             .length = @intCast(u16, received.len),
         };

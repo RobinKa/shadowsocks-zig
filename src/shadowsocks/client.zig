@@ -81,7 +81,7 @@ pub const Client = struct {
 
         const fixed_header = headers.FixedLengthRequestHeader{
             .type = 0,
-            .timestamp = @intCast(u64, std.time.milliTimestamp()) / 1000,
+            .timestamp = @intCast(u64, std.time.timestamp()),
             .length = @intCast(u16, encoded_variable_header_size),
         };
 
