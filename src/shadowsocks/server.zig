@@ -38,7 +38,6 @@ const ClientState = struct {
     session_subkey: [32]u8 = undefined,
 
     fn deinit(self: @This()) void {
-        self.socket.close();
         self.remote_socket.close();
         self.socket_set.deinit();
     }
@@ -418,15 +417,20 @@ fn handleClient(socket: network.Socket, server_state: *ServerState, allocator: s
     }
 }
 
-fn handleClientCatchAll(socket: network.Socket, server_state: *ServerState, allocator: std.mem.Allocator) void {
+fn handleClientCatchAll(socket: network.Socket, server_state: *ServerState, on_error: anytype, allocator: std.mem.Allocator) void {
     handleClient(socket, server_state, allocator) catch |err| {
-        std.debug.print("client terminated: {s}\n", .{@errorName(err)});
+        closeSocketNoLinger(socket);
+        on_error(err);
     };
+}
+
+fn onClientError(err: anytype) void {
+    std.debug.print("client terminated: {s}\n", .{@errorName(err)});
 }
 
 pub fn start(port: u16, key: []const u8, allocator: std.mem.Allocator) !void {
     var socket = try network.Socket.create(.ipv4, .tcp);
-    defer closeSocketNoLinger(socket);
+    defer socket.close();
     try socket.bindToPort(port);
     try socket.listen();
 
@@ -439,7 +443,7 @@ pub fn start(port: u16, key: []const u8, allocator: std.mem.Allocator) !void {
         var client = try socket.accept();
         std.debug.print("Accepted new client\n", .{});
 
-        (try std.Thread.spawn(.{}, handleClientCatchAll, .{ client, &server_state, allocator })).detach();
+        (try std.Thread.spawn(.{}, handleClientCatchAll, .{ client, &server_state, onClientError, allocator })).detach();
         std.time.sleep(std.time.ns_per_us * 100);
     }
 
