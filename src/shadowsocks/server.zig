@@ -84,7 +84,6 @@ fn handleWaitForFixed(state: *ClientState, server_state: *ServerState, allocator
     const time: u64 = @intCast(u64, std.time.milliTimestamp());
     server_state.request_salt_cache.removeSaltsAfterTime(time + 60 * std.time.ms_per_s);
 
-    
     if (!try server_state.request_salt_cache.maybeAddRequestSalt(&state.request_salt, time)) {
         return ShadowsocksError.DuplicateSalt;
     }
@@ -298,6 +297,26 @@ fn handleResponse(state: *ClientState, received: []const u8, allocator: std.mem.
     }
 }
 
+fn closeSocketNoLinger(socket: network.Socket) void {
+    const SO_LINGER = 0x00000800;
+
+    const Linger = extern struct {
+        l_onoff: u16,
+        l_linger: u16,
+    };
+
+    const value: Linger = .{
+        .l_onoff = 0,
+        .l_linger = 0,
+    };
+
+    std.os.setsockopt(socket.internal, std.os.SOL.SOCKET, SO_LINGER, std.mem.asBytes(&value)) catch |err| {
+        std.debug.print("Failed to set SO_LINGER: {s}", .{@errorName(err)});
+    };
+
+    socket.close();
+}
+
 fn handleClient(socket: network.Socket, server_state: *ServerState, allocator: std.mem.Allocator) !void {
     var response_salt: [32]u8 = undefined;
 
@@ -391,7 +410,7 @@ fn handleClientCatchAll(socket: network.Socket, server_state: *ServerState, allo
 
 pub fn start(port: u16, key: []const u8, allocator: std.mem.Allocator) !void {
     var socket = try network.Socket.create(.ipv4, .tcp);
-    defer socket.close();
+    defer closeSocketNoLinger(socket);
     try socket.bindToPort(port);
     try socket.listen();
 
