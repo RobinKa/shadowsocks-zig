@@ -33,9 +33,11 @@ pub const SaltCache = struct {
     }
 
     pub fn deinit(self: *@This()) void {
-        for (self.request_salts.items) |salt| {
-            self.allocator.free(salt.salt);
+        while (self.request_salts.count() > 0) {
+            var salt = self.request_salts.remove();
+            self.allocator.free(salt);
         }
+
         self.request_salts.deinit();
         self.request_salts_set.deinit();
     }
