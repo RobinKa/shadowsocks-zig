@@ -318,8 +318,6 @@ fn forwardToClient(state: *ClientState, received: []const u8, allocator: std.mem
 }
 
 fn closeSocketNoLinger(socket: network.Socket) void {
-    const SO_LINGER = 0x0080;
-
     const Linger = extern struct {
         l_onoff: u16,
         l_linger: u16,
@@ -330,7 +328,7 @@ fn closeSocketNoLinger(socket: network.Socket) void {
         .l_linger = 0,
     };
 
-    std.os.setsockopt(socket.internal, std.os.SOL.SOCKET, SO_LINGER, std.mem.asBytes(&value)) catch |err| {
+    std.os.setsockopt(socket.internal, std.os.SOL.SOCKET, std.os.SO.LINGER, std.mem.asBytes(&value)) catch |err| {
         std.debug.print("Failed to set SO_LINGER: {s}", .{@errorName(err)});
     };
 
