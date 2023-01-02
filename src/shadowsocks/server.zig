@@ -37,9 +37,30 @@ const ClientState = struct {
     request_decryptor: Crypto.Encryptor = undefined,
     session_subkey: [32]u8 = undefined,
 
+    fn init(socket: network.Socket, key: [32]u8, socket_set: *network.SocketSet, allocator: std.mem.Allocator) !@This() {
+        var response_salt = try Crypto.generateRandomSalt();
+
+        var remote_socket = try network.Socket.create(.ipv4, .tcp);
+        errdefer remote_socket.close();
+
+        var recv_buffer = try std.ArrayList(u8).initCapacity(allocator, 1024);
+        errdefer recv_buffer.deinit();
+
+        return .{
+            .socket = socket,
+            .remote_socket = remote_socket,
+            .socket_set = socket_set,
+            .key = key,
+            .response_salt = response_salt,
+            .response_encryptor = .{
+                .key = Crypto.deriveSessionSubkeyWithSalt(key, response_salt),
+            },
+            .recv_buffer = recv_buffer,
+        };
+    }
+
     fn deinit(self: @This()) void {
         self.remote_socket.close();
-        self.socket_set.deinit();
     }
 };
 
@@ -240,7 +261,7 @@ fn handleWaitForPayload(state: *ClientState, allocator: std.mem.Allocator) !bool
     return true;
 }
 
-fn handleResponse(state: *ClientState, received: []const u8, allocator: std.mem.Allocator) !void {
+fn forwardToClient(state: *ClientState, received: []const u8, allocator: std.mem.Allocator) !void {
     var send_buffer = try std.ArrayList(u8).initCapacity(allocator, 1024);
     defer send_buffer.deinit();
 
@@ -317,22 +338,10 @@ fn closeSocketNoLinger(socket: network.Socket) void {
 }
 
 fn handleClient(socket: network.Socket, server_state: *ServerState, allocator: std.mem.Allocator) !void {
-    var response_salt: [32]u8 = try Crypto.generateRandomSalt();
-
     var socket_set = try network.SocketSet.init(allocator);
+    defer socket_set.deinit();
 
-    // TODO: if any of the trys fail, things aren't cleaned up properly.
-    var state = ClientState{
-        .socket = socket,
-        .remote_socket = try network.Socket.create(.ipv4, .tcp),
-        .socket_set = &socket_set,
-        .key = server_state.key,
-        .response_salt = response_salt,
-        .response_encryptor = .{
-            .key = Crypto.deriveSessionSubkeyWithSalt(server_state.key, response_salt),
-        },
-        .recv_buffer = try std.ArrayList(u8).initCapacity(allocator, 1024),
-    };
+    var state = try ClientState.init(socket, server_state.key, &socket_set, allocator);
     defer state.deinit();
 
     try state.socket_set.add(state.socket, .{
@@ -344,6 +353,7 @@ fn handleClient(socket: network.Socket, server_state: *ServerState, allocator: s
     while (true) {
         _ = try network.waitForSocketEvent(state.socket_set, null);
 
+        // Buffer data sent from client to server
         if (state.socket_set.isReadyRead(state.socket)) {
             const count = try state.socket.receive(&buffer);
             std.debug.print("c->s {d}\n", .{count});
@@ -355,6 +365,7 @@ fn handleClient(socket: network.Socket, server_state: *ServerState, allocator: s
             try state.recv_buffer.appendSlice(buffer[0..count]);
         }
 
+        // Forward data sent from remote to server to client
         if (state.socket_set.isReadyRead(state.remote_socket)) {
             const count = try state.remote_socket.receive(&buffer);
             std.debug.print("r->s {d}\n", .{count});
@@ -363,9 +374,10 @@ fn handleClient(socket: network.Socket, server_state: *ServerState, allocator: s
                 return ShadowsocksError.RemoteDisconnected;
             }
 
-            try handleResponse(&state, buffer[0..count], allocator);
+            try forwardToClient(&state, buffer[0..count], allocator);
         }
 
+        // Handle buffered data received from the client
         while (true) {
             switch (state.status) {
                 .wait_for_fixed => {
@@ -412,7 +424,6 @@ pub fn start(port: u16, key: [32]u8, allocator: std.mem.Allocator) !void {
         std.debug.print("Accepted new client\n", .{});
 
         (try std.Thread.spawn(.{}, handleClientCatchAll, .{ client, &server_state, onClientError, allocator })).detach();
-        std.time.sleep(std.time.ns_per_us * 100);
     }
 
     std.debug.print("Done", .{});
