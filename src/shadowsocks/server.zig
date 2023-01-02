@@ -319,8 +319,8 @@ fn forwardToClient(state: *ClientState, received: []const u8, allocator: std.mem
 
 fn closeSocketWithRst(socket: network.Socket) void {
     const Linger = extern struct {
-        l_onoff: i32,
-        l_linger: i32,
+        l_onoff: c_int,
+        l_linger: c_int,
     };
 
     const value: Linger = .{
