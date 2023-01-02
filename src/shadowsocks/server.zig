@@ -47,10 +47,10 @@ const ServerState = struct {
     key: []const u8,
     request_salt_cache: Salts.SaltCache,
 
-    fn init(key: []const u8, allocator: std.mem.Allocator) !@This() {
+    fn init(key: []const u8, allocator: std.mem.Allocator) @This() {
         return .{
             .key = key,
-            .request_salt_cache = try Salts.SaltCache.init(allocator),
+            .request_salt_cache = Salts.SaltCache.init(allocator),
         };
     }
 
@@ -83,9 +83,9 @@ fn handleWaitForFixed(state: *ClientState, server_state: *ServerState, allocator
 
     // Detect replay attacks with duplicate salts
     const time: u64 = @intCast(u64, std.time.milliTimestamp());
-    server_state.request_salt_cache.removeSaltsAfterTime(time + 60 * std.time.ms_per_s);
+    server_state.request_salt_cache.removeAfterTime(time + 60 * std.time.ms_per_s);
 
-    if (!try server_state.request_salt_cache.maybeAddRequestSalt(&state.request_salt, time)) {
+    if (!try server_state.request_salt_cache.maybeAdd(&state.request_salt, time)) {
         return ShadowsocksError.DuplicateSalt;
     }
 
@@ -434,7 +434,7 @@ pub fn start(port: u16, key: []const u8, allocator: std.mem.Allocator) !void {
     try socket.bindToPort(port);
     try socket.listen();
 
-    var server_state = try ServerState.init(key, allocator);
+    var server_state = ServerState.init(key, allocator);
     defer server_state.deinit();
 
     std.debug.print("Listening on port {d}\n", .{port});
