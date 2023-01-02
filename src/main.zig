@@ -43,7 +43,7 @@ pub fn main() !void {
     var key: [32]u8 = undefined;
     try std.base64.standard.Decoder.decode(&key, cfg.key);
 
-    shadowsocks.Server.start(cfg.port, key, allocator) catch |err| {
+    shadowsocks.server.Server(shadowsocks.crypto.Blake3Aes256Gcm).start(cfg.port, key, allocator) catch |err| {
         std.debug.print("Server failed, error: {s}\n", .{@errorName(err)});
     };
 }

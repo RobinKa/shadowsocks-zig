@@ -1,4 +1,5 @@
 const std = @import("std");
+
 const Blake3 = std.crypto.hash.Blake3;
 
 const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
@@ -130,9 +131,9 @@ test "Encryptor decrypt" {
 }
 
 test "generateRandomSalt" {
-    inline for (Methods) |Method| {
-        var salt_a: [Method.salt_length]u8 = try Method.generateRandomSalt();
-        var salt_b: [Method.salt_length]u8 = try Method.generateRandomSalt();
+    inline for (Methods) |TCrypto| {
+        var salt_a: [TCrypto.salt_length]u8 = try TCrypto.generateRandomSalt();
+        var salt_b: [TCrypto.salt_length]u8 = try TCrypto.generateRandomSalt();
         try std.testing.expect(!std.mem.eql(u8, &salt_a, &salt_b));
     }
 }

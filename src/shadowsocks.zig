@@ -1,7 +1,7 @@
-pub const Crypto = @import("shadowsocks/crypto.zig");
-pub const Headers = @import("shadowsocks/headers.zig");
-pub const Server = @import("shadowsocks/server.zig");
-pub const Client = @import("shadowsocks/client.zig");
+pub const crypto = @import("shadowsocks/crypto.zig");
+pub const headers = @import("shadowsocks/headers.zig");
+pub const server = @import("shadowsocks/server.zig");
+pub const client = @import("shadowsocks/client.zig");
 
 const std = @import("std");
 const network = @import("network");
@@ -12,22 +12,22 @@ test {
 }
 
 test "FixedLengthRequestHeader - derive, encode, encrypt, decrypt, decode" {
-    inline for (Crypto.Methods) |CryptoMethod| {
-        var salt: [CryptoMethod.salt_length]u8 = try CryptoMethod.generateRandomSalt();
-        var key: [CryptoMethod.key_length]u8 = undefined;
+    inline for (crypto.Methods) |TCrypto| {
+        var salt: [TCrypto.salt_length]u8 = try TCrypto.generateRandomSalt();
+        var key: [TCrypto.key_length]u8 = undefined;
         try std.os.getrandom(&key);
 
-        var session_subkey = CryptoMethod.deriveSessionSubkeyWithSalt(key, salt);
+        var session_subkey = TCrypto.deriveSessionSubkeyWithSalt(key, salt);
 
-        var encode_encryptor: CryptoMethod.Encryptor = .{
+        var encode_encryptor: TCrypto.Encryptor = .{
             .key = session_subkey,
         };
 
-        var decode_encryptor: CryptoMethod.Encryptor = .{
+        var decode_encryptor: TCrypto.Encryptor = .{
             .key = session_subkey,
         };
 
-        const header = Headers.FixedLengthRequestHeader{
+        const header = headers.FixedLengthRequestHeader{
             .type = 0,
             .timestamp = 123,
             .length = 33,
@@ -37,13 +37,13 @@ test "FixedLengthRequestHeader - derive, encode, encrypt, decrypt, decode" {
         _ = try header.encode(&encoded);
 
         var encrypted: [encoded.len]u8 = undefined;
-        var tag: [CryptoMethod.tag_length]u8 = undefined;
+        var tag: [TCrypto.tag_length]u8 = undefined;
         encode_encryptor.encrypt(&encoded, &encrypted, &tag);
 
         var decrypted: [encrypted.len]u8 = undefined;
         try decode_encryptor.decrypt(&decrypted, &encrypted, tag);
 
-        const decoded = try Headers.FixedLengthRequestHeader.decode(&decrypted);
+        const decoded = try headers.FixedLengthRequestHeader.decode(&decrypted);
 
         try std.testing.expectEqual(@as(usize, 11), decoded.bytes_read);
         try std.testing.expectEqual(header.length, decoded.result.length);

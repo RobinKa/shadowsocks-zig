@@ -1,8 +1,8 @@
 const std = @import("std");
 const network = @import("network");
-const Crypto = @import("crypto.zig");
-const Headers = @import("headers.zig");
-const Salts = @import("salts.zig");
+const crypto = @import("crypto.zig");
+const headers = @import("headers.zig");
+const salts = @import("salts.zig");
 
 pub fn Server(comptime TCrypto: type) type {
     return struct {
@@ -68,12 +68,12 @@ pub fn Server(comptime TCrypto: type) type {
 
         const ServerState = struct {
             key: [TCrypto.key_length]u8,
-            request_salt_cache: Salts.SaltCache,
+            request_salt_cache: salts.SaltCache,
 
             fn init(key: [TCrypto.key_length]u8, allocator: std.mem.Allocator) @This() {
                 return .{
                     .key = key,
-                    .request_salt_cache = Salts.SaltCache.init(allocator),
+                    .request_salt_cache = salts.SaltCache.init(allocator),
                 };
             }
 
@@ -121,7 +121,7 @@ pub fn Server(comptime TCrypto: type) type {
                 &state.request_decryptor,
             );
 
-            const decoded_header = (try Headers.FixedLengthRequestHeader.decode(&decrypted)).result;
+            const decoded_header = (try headers.FixedLengthRequestHeader.decode(&decrypted)).result;
 
             // Detect replay attacks by checking for old timestamps
             if (@intCast(u64, std.time.timestamp()) > decoded_header.timestamp + 30) {
@@ -146,7 +146,7 @@ pub fn Server(comptime TCrypto: type) type {
 
             try readContent(state.recv_buffer.items[0 .. state.length + TCrypto.tag_length], decrypted, &state.request_decryptor);
 
-            const decoded_header = (try Headers.VariableLengthRequestHeader.decode(decrypted, state.length, allocator)).result;
+            const decoded_header = (try headers.VariableLengthRequestHeader.decode(decrypted, state.length, allocator)).result;
 
             if (decoded_header.padding.len == 0 and decoded_header.initial_payload.len == 0) {
                 return ShadowsocksError.NoInitialPayloadOrPadding;
@@ -274,7 +274,7 @@ pub fn Server(comptime TCrypto: type) type {
             if (!state.sent_initial_response) {
                 try send_buffer.appendSlice(&state.response_salt);
 
-                const THeader = Headers.FixedLengthResponseHeader(TCrypto.salt_length);
+                const THeader = headers.FixedLengthResponseHeader(TCrypto.salt_length);
 
                 const header: THeader = .{
                     .type = 1,
@@ -441,5 +441,3 @@ pub fn Server(comptime TCrypto: type) type {
         }
     };
 }
-
-pub const start = Server(Crypto.Blake3Aes256Gcm).start;
