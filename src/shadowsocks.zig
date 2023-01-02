@@ -12,37 +12,42 @@ test {
 }
 
 test "FixedLengthRequestHeader - derive, encode, encrypt, decrypt, decode" {
-    var session_subkey: [32]u8 = undefined;
-    Crypto.deriveSessionSubkey("test key", &session_subkey);
+    inline for (Crypto.Methods) |CryptoMethod| {
+        var salt: [CryptoMethod.salt_length]u8 = try CryptoMethod.generateRandomSalt();
+        var key: [CryptoMethod.key_length]u8 = undefined;
+        try std.os.getrandom(&key);
 
-    var encode_encryptor: Crypto.Encryptor = .{
-        .key = session_subkey,
-    };
+        var session_subkey = CryptoMethod.deriveSessionSubkeyWithSalt(key, salt);
 
-    var decode_encryptor: Crypto.Encryptor = .{
-        .key = session_subkey,
-    };
+        var encode_encryptor: CryptoMethod.Encryptor = .{
+            .key = session_subkey,
+        };
 
-    const header = Headers.FixedLengthRequestHeader{
-        .type = 0,
-        .timestamp = 123,
-        .length = 33,
-    };
+        var decode_encryptor: CryptoMethod.Encryptor = .{
+            .key = session_subkey,
+        };
 
-    var encoded: [11]u8 = undefined;
-    _ = try header.encode(&encoded);
+        const header = Headers.FixedLengthRequestHeader{
+            .type = 0,
+            .timestamp = 123,
+            .length = 33,
+        };
 
-    var encrypted: [encoded.len]u8 = undefined;
-    var tag: [16]u8 = undefined;
-    encode_encryptor.encrypt(&encoded, &encrypted, &tag);
+        var encoded: [11]u8 = undefined;
+        _ = try header.encode(&encoded);
 
-    var decrypted: [encrypted.len]u8 = undefined;
-    try decode_encryptor.decrypt(&decrypted, &encrypted, tag);
+        var encrypted: [encoded.len]u8 = undefined;
+        var tag: [CryptoMethod.tag_length]u8 = undefined;
+        encode_encryptor.encrypt(&encoded, &encrypted, &tag);
 
-    const decoded = try Headers.FixedLengthRequestHeader.decode(&decrypted);
+        var decrypted: [encrypted.len]u8 = undefined;
+        try decode_encryptor.decrypt(&decrypted, &encrypted, tag);
 
-    try std.testing.expectEqual(@as(usize, 11), decoded.bytes_read);
-    try std.testing.expectEqual(header.length, decoded.result.length);
-    try std.testing.expectEqual(header.timestamp, decoded.result.timestamp);
-    try std.testing.expectEqual(header.type, decoded.result.type);
+        const decoded = try Headers.FixedLengthRequestHeader.decode(&decrypted);
+
+        try std.testing.expectEqual(@as(usize, 11), decoded.bytes_read);
+        try std.testing.expectEqual(header.length, decoded.result.length);
+        try std.testing.expectEqual(header.timestamp, decoded.result.timestamp);
+        try std.testing.expectEqual(header.type, decoded.result.type);
+    }
 }

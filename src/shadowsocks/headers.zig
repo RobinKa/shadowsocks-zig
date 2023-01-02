@@ -143,45 +143,49 @@ pub const VariableLengthRequestHeader = struct {
     }
 };
 
-pub const FixedLengthResponseHeader = struct {
-    type: u8,
-    timestamp: u64,
-    salt: [32]u8,
-    length: u16,
+pub fn FixedLengthResponseHeader(comptime salt_length: usize) type {
+    return struct {
+        pub const size: usize = 1 + 8 + salt_length + 2;
 
-    pub fn decode(encoded: []u8) !DecodeResult(@This()) {
-        var stream = std.io.fixedBufferStream(encoded);
-        var reader = stream.reader();
+        type: u8,
+        timestamp: u64,
+        salt: [salt_length]u8,
+        length: u16,
 
-        const t = try reader.readIntBig(u8);
-        const timestamp = try reader.readIntBig(u64);
-        var salt: [32]u8 = undefined;
-        try reader.readNoEof(&salt);
-        const length = try reader.readIntBig(u16);
+        pub fn decode(encoded: []u8) !DecodeResult(@This()) {
+            var stream = std.io.fixedBufferStream(encoded);
+            var reader = stream.reader();
 
-        return .{
-            .result = .{
-                .type = t,
-                .timestamp = timestamp,
-                .salt = salt,
-                .length = length,
-            },
-            .bytes_read = stream.pos,
-        };
-    }
+            const t = try reader.readIntBig(u8);
+            const timestamp = try reader.readIntBig(u64);
+            var salt: [salt_length]u8 = undefined;
+            try reader.readNoEof(&salt);
+            const length = try reader.readIntBig(u16);
 
-    pub fn encode(self: @This(), encoded: []u8) !usize {
-        var stream = std.io.fixedBufferStream(encoded);
-        var writer = stream.writer();
+            return .{
+                .result = .{
+                    .type = t,
+                    .timestamp = timestamp,
+                    .salt = salt,
+                    .length = length,
+                },
+                .bytes_read = stream.pos,
+            };
+        }
 
-        try writer.writeIntBig(u8, self.type);
-        try writer.writeIntBig(u64, self.timestamp);
-        _ = try writer.write(&self.salt);
-        try writer.writeIntBig(u16, self.length);
+        pub fn encode(self: @This(), encoded: []u8) !usize {
+            var stream = std.io.fixedBufferStream(encoded);
+            var writer = stream.writer();
 
-        return stream.pos;
-    }
-};
+            try writer.writeIntBig(u8, self.type);
+            try writer.writeIntBig(u64, self.timestamp);
+            _ = try writer.write(&self.salt);
+            try writer.writeIntBig(u16, self.length);
+
+            return stream.pos;
+        }
+    };
+}
 
 test "encode FixedLengthRequestHeader" {
     const header = FixedLengthRequestHeader{
@@ -262,7 +266,7 @@ test "decode VariableLengthRequestHeader IPv6" {
 }
 
 test "encode FixedLengthResponseHeader" {
-    const header = FixedLengthResponseHeader{
+    const header = FixedLengthResponseHeader(32){
         .type = 0,
         .timestamp = 123,
         .salt = .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 },
@@ -279,7 +283,7 @@ test "encode FixedLengthResponseHeader" {
 test "decode FixedLengthResponseHeader" {
     var buffer = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 123, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 0, 33, 7, 8, 9, 10 };
 
-    const decoded = try FixedLengthResponseHeader.decode(&buffer);
+    const decoded = try FixedLengthResponseHeader(32).decode(&buffer);
 
     try std.testing.expectEqual(@as(usize, 43), decoded.bytes_read);
     try std.testing.expectEqual(@as(u8, 0), decoded.result.type);

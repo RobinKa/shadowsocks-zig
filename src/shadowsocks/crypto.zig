@@ -1,6 +1,11 @@
 const std = @import("std");
 const Blake3 = std.crypto.hash.Blake3;
+
+const Aes128Gcm = std.crypto.aead.aes_gcm.Aes128Gcm;
 const Aes256Gcm = std.crypto.aead.aes_gcm.Aes256Gcm;
+const ChaCha8Poly1305 = std.crypto.aead.chacha_poly.ChaCha8Poly1305;
+const ChaCha12Poly1305 = std.crypto.aead.chacha_poly.ChaCha12Poly1305;
+const ChaCha20Poly1305 = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
 
 pub fn deriveSessionSubkey(key: []const u8, session_subkey: []u8) void {
     var blake = Blake3.initKdf("shadowsocks 2022 session subkey", .{});
@@ -8,50 +13,80 @@ pub fn deriveSessionSubkey(key: []const u8, session_subkey: []u8) void {
     blake.final(session_subkey);
 }
 
-pub fn deriveSessionSubkeyWithSalt(key: [32]u8, salt: [32]u8) [32]u8 {
-    var key_and_salt: [key.len + salt.len]u8 = undefined;
-    std.mem.copy(u8, key_and_salt[0..key.len], &key);
-    std.mem.copy(u8, key_and_salt[key.len .. key.len + salt.len], &salt);
+fn Crypto(comptime TAlg: type, comptime salt_size: usize) type {
+    // We use u96 for the nonce, so make sure nonce_length is 12 (96/8).
+    std.debug.assert(TAlg.nonce_length == 12);
 
-    var session_subkey: [32]u8 = undefined;
-    deriveSessionSubkey(&key_and_salt, &session_subkey);
+    return struct {
+        pub const salt_length = salt_size;
+        pub const tag_length = TAlg.tag_length;
+        pub const key_length = TAlg.key_length;
+        pub const nonce_length = TAlg.nonce_length;
 
-    return session_subkey;
+        pub fn deriveSessionSubkeyWithSalt(key: [key_length]u8, salt: [salt_length]u8) [key_length]u8 {
+            var key_and_salt: [key.len + salt.len]u8 = undefined;
+            std.mem.copy(u8, key_and_salt[0..key.len], &key);
+            std.mem.copy(u8, key_and_salt[key.len .. key.len + salt.len], &salt);
+
+            var session_subkey: [key_length]u8 = undefined;
+            deriveSessionSubkey(&key_and_salt, &session_subkey);
+
+            return session_subkey;
+        }
+
+        pub fn generateRandomSalt() ![salt_length]u8 {
+            var seed: [std.rand.DefaultCsprng.secret_seed_length]u8 = undefined;
+            try std.os.getrandom(&seed);
+
+            var salt: [salt_length]u8 = undefined;
+            var prng = std.rand.DefaultCsprng.init(seed);
+            prng.fill(&salt);
+
+            return salt;
+        }
+
+        pub const Encryptor = struct {
+            nonce: u96 = 0,
+            key: [key_length]u8,
+
+            pub fn encrypt(self: *@This(), message: []const u8, encrypted: []u8, tag: *[tag_length]u8) void {
+                var nonce: [nonce_length]u8 = undefined;
+                std.mem.writeIntLittle(u96, &nonce, self.nonce);
+
+                TAlg.encrypt(encrypted, tag, message, "", nonce, self.key);
+
+                self.nonce += 1;
+            }
+
+            pub fn decrypt(self: *@This(), message: []u8, encrypted: []const u8, tag: [tag_length]u8) !void {
+                var nonce: [nonce_length]u8 = undefined;
+                std.mem.writeIntLittle(u96, &nonce, self.nonce);
+
+                try TAlg.decrypt(message, encrypted, tag, "", nonce, self.key);
+
+                self.nonce += 1;
+            }
+        };
+    };
 }
 
-pub fn generateRandomSalt() ![32]u8 {
-    var seed: [std.rand.DefaultCsprng.secret_seed_length]u8 = undefined;
-    try std.os.getrandom(&seed);
+pub const Blake3Aes128Gcm = Crypto(Aes128Gcm, 16);
+pub const Blake3Aes256Gcm = Crypto(Aes256Gcm, 32);
+pub const Blake3ChaCha8Poly1305 = Crypto(ChaCha8Poly1305, 32);
+pub const Blake3ChaCha12Poly1305 = Crypto(ChaCha12Poly1305, 32);
+pub const Blake3ChaCha20Poly1305 = Crypto(ChaCha20Poly1305, 32);
 
-    var salt: [32]u8 = undefined;
-    var prng = std.rand.DefaultCsprng.init(seed);
-    prng.fill(&salt);
-
-    return salt;
-}
-
-pub const Encryptor = struct {
-    nonce: u96 = 0,
-    key: [Aes256Gcm.key_length]u8,
-
-    pub fn encrypt(self: *@This(), message: []const u8, encrypted: []u8, tag: *[Aes256Gcm.tag_length]u8) void {
-        var nonce: [96 / 8]u8 = undefined;
-        std.mem.writeIntLittle(u96, &nonce, self.nonce);
-
-        Aes256Gcm.encrypt(encrypted, tag, message, "", nonce, self.key);
-
-        self.nonce += 1;
-    }
-
-    pub fn decrypt(self: *@This(), message: []u8, encrypted: []const u8, tag: [Aes256Gcm.tag_length]u8) !void {
-        var nonce: [96 / 8]u8 = undefined;
-        std.mem.writeIntLittle(u96, &nonce, self.nonce);
-
-        try Aes256Gcm.decrypt(message, encrypted, tag, "", nonce, self.key);
-
-        self.nonce += 1;
-    }
+pub const Methods = [_]type{
+    Blake3Aes128Gcm,
+    Blake3Aes256Gcm,
+    Blake3ChaCha8Poly1305,
+    Blake3ChaCha12Poly1305,
+    Blake3ChaCha20Poly1305,
 };
+
+pub const Encryptor = Blake3Aes256Gcm.Encryptor;
+pub const generateRandomSalt = Blake3Aes256Gcm.generateRandomSalt;
+pub const deriveSessionSubkeyWithSalt = Blake3Aes256Gcm.deriveSessionSubkeyWithSalt;
 
 test "deriveSessionSubkey" {
     var session_subkey: [32]u8 = undefined;
@@ -95,9 +130,11 @@ test "Encryptor decrypt" {
 }
 
 test "generateRandomSalt" {
-    var salt_a: [32]u8 = try generateRandomSalt();
-    var salt_b: [32]u8 = try generateRandomSalt();
-    try std.testing.expect(!std.mem.eql(u8, &salt_a, &salt_b));
+    inline for (Methods) |Method| {
+        var salt_a: [Method.salt_length]u8 = try Method.generateRandomSalt();
+        var salt_b: [Method.salt_length]u8 = try Method.generateRandomSalt();
+        try std.testing.expect(!std.mem.eql(u8, &salt_a, &salt_b));
+    }
 }
 
 test "Test decrypt real data" {

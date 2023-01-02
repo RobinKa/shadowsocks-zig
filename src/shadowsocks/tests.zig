@@ -2,6 +2,7 @@ const std = @import("std");
 const network = @import("network");
 const shadowsocks_client = @import("client.zig");
 const shadowsocks_server = @import("server.zig");
+const crypto = @import("crypto.zig");
 
 const MitmData = struct {
     sent: std.ArrayList(u8),
@@ -84,8 +85,8 @@ fn startMitmProxy(
     }
 }
 
-fn runProxyServer(port: u16, key: [32]u8) !void {
-    try shadowsocks_server.start(port, key, std.heap.page_allocator);
+fn runProxyServer(comptime TCrypto: type, port: u16, key: [TCrypto.key_length]u8) !void {
+    try shadowsocks_server.Server(TCrypto).start(port, key, std.heap.page_allocator);
 }
 
 fn waitCanConnect(port: u16) !void {
@@ -111,17 +112,16 @@ fn waitCanConnect(port: u16) !void {
     }
 }
 
-test "client send initial payload" {
-    const port = 10_001;
-    var key: [32]u8 = undefined;
-    try std.base64.standard.Decoder.decode(&key, "AcxUIVEsMN7a5bk2swV8uCFb9MGkY5pZumaStQ4CVKc=");
+fn clientSendInitialPayloadTest(comptime TCrypto: type, encoded_key: []const u8, port: u16) !void {
+    var key: [TCrypto.key_length]u8 = undefined;
+    try std.base64.standard.Decoder.decode(&key, encoded_key);
 
-    _ = try std.Thread.spawn(.{}, runProxyServer, .{ port, key });
+    _ = try std.Thread.spawn(.{}, runProxyServer, .{ TCrypto, port, key });
     try waitCanConnect(port);
 
     const initial_payload = "GET / HTTP/1.1\r\nHost: eu.httpbin.org\r\n\r\n";
 
-    var client = try shadowsocks_client.Client.connect(.{ 127, 0, 0, 1 }, port, "eu.httpbin.org", 80, key, initial_payload, std.testing.allocator);
+    var client = try shadowsocks_client.Client(TCrypto).connect(.{ 127, 0, 0, 1 }, port, "eu.httpbin.org", 80, key, initial_payload, std.testing.allocator);
     defer client.deinit();
 
     var recv_buffer: [1024]u8 = undefined;
@@ -138,15 +138,35 @@ test "client send initial payload" {
     }
 }
 
-test "client send non-initial payload" {
-    const port = 10_002;
+test "client send initial payload - Blake3Aes256Gcm" {
+    try clientSendInitialPayloadTest(crypto.Blake3Aes256Gcm, "AcxUIVEsMN7a5bk2swV8uCFb9MGkY5pZumaStQ4CVKc=", 10_001);
+}
+
+test "client send initial payload - Blake3Aes128Gcm" {
+    try clientSendInitialPayloadTest(crypto.Blake3Aes128Gcm, "0hYao6RoEoW3CTYLlhq2vw==", 10_002);
+}
+
+test "client send initial payload - Blake3ChaCha8Poly1305" {
+    try clientSendInitialPayloadTest(crypto.Blake3ChaCha8Poly1305, "AcxUIVEsMN7a5bk2swV8uCFb9MGkY5pZumaStQ4CVKc=", 10_003);
+}
+
+test "client send initial payload - Blake3ChaCha12Poly1305" {
+    try clientSendInitialPayloadTest(crypto.Blake3ChaCha12Poly1305, "AcxUIVEsMN7a5bk2swV8uCFb9MGkY5pZumaStQ4CVKc=", 10_004);
+}
+
+test "client send initial payload - Blake3ChaCha20Poly1305" {
+    try clientSendInitialPayloadTest(crypto.Blake3ChaCha20Poly1305, "AcxUIVEsMN7a5bk2swV8uCFb9MGkY5pZumaStQ4CVKc=", 10_005);
+}
+
+test "client send non-initial payload - Blake3Aes256Gcm" {
+    const port = 10_006;
     var key: [32]u8 = undefined;
     try std.base64.standard.Decoder.decode(&key, "AcxUIVEsMN7a5bk2swV8uCFb9MGkY5pZumaStQ4CVKc=");
 
-    _ = try std.Thread.spawn(.{}, runProxyServer, .{ port, key });
+    _ = try std.Thread.spawn(.{}, runProxyServer, .{ crypto.Blake3Aes256Gcm, port, key });
     try waitCanConnect(port);
 
-    var client = try shadowsocks_client.Client.connect(.{ 127, 0, 0, 1 }, port, "eu.httpbin.org", 80, key, &.{}, std.testing.allocator);
+    var client = try shadowsocks_client.Client(crypto.Blake3Aes256Gcm).connect(.{ 127, 0, 0, 1 }, port, "eu.httpbin.org", 80, key, &.{}, std.testing.allocator);
     defer client.deinit();
 
     const payload = "GET / HTTP/1.1\r\nHost: eu.httpbin.org\r\n\r\n";
@@ -167,9 +187,9 @@ test "client send non-initial payload" {
     }
 }
 
-test "MITM replay fails" {
-    const mitm_port = 10_003;
-    const proxy_port = 10_004;
+test "MITM replay fails - Blake3Aes256Gcm" {
+    const mitm_port = 10_007;
+    const proxy_port = 10_008;
 
     // Start MITM proxy
     var mitm_data = MitmData.init(std.heap.page_allocator);
@@ -187,11 +207,11 @@ test "MITM replay fails" {
     // Start Shadowsocks proxy
     var key: [32]u8 = undefined;
     try std.base64.standard.Decoder.decode(&key, "AcxUIVEsMN7a5bk2swV8uCFb9MGkY5pZumaStQ4CVKc=");
-    _ = try std.Thread.spawn(.{}, runProxyServer, .{ proxy_port, key });
+    _ = try std.Thread.spawn(.{}, runProxyServer, .{ crypto.Blake3Aes256Gcm, proxy_port, key });
     try waitCanConnect(proxy_port);
 
     // Proxy original http request
-    var client = try shadowsocks_client.Client.connect(.{ 127, 0, 0, 1 }, mitm_port, "eu.httpbin.org", 80, key, &.{}, std.testing.allocator);
+    var client = try shadowsocks_client.Client(crypto.Blake3Aes256Gcm).connect(.{ 127, 0, 0, 1 }, mitm_port, "eu.httpbin.org", 80, key, &.{}, std.testing.allocator);
     defer client.deinit();
 
     const payload = "GET / HTTP/1.1\r\nHost: eu.httpbin.org\r\n\r\n";
@@ -224,6 +244,5 @@ test "MITM replay fails" {
 
     const replay_received = socket.receive(&recv_buffer);
 
-    // TODO: Windows
     try std.testing.expectError(network.Socket.ReceiveError.ConnectionResetByPeer, replay_received);
 }
