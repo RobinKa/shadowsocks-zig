@@ -105,8 +105,9 @@ fn waitCanConnect(port: u16) !void {
             if (retries >= 5) {
                 return error.CantConnectToRemote;
             }
-            logger.info("Failed to connect on attempt {d}, retrying", .{retries});
-            std.time.sleep(std.time.ns_per_s);
+            const sleep_time_ms = std.math.shl(u64, 200, retries - 1);
+            logger.info("Failed to connect on attempt {d}, retrying in {d}ms", .{ retries, sleep_time_ms });
+            std.time.sleep(std.time.ns_per_ms * sleep_time_ms);
             continue;
         };
 
