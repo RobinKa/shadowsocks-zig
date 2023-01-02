@@ -57,9 +57,7 @@ pub fn main() !void {
 
     logger.info("Starting with port {d} and encryption method {s}", .{ cfg.port, cfg.method });
 
-    startServerFromConfig(cfg, allocator) catch |err| {
-        logger.err("Server failed, error: {s}", .{@errorName(err)});
-    };
+    try startServerFromConfig(cfg, allocator);
 }
 
 test {
