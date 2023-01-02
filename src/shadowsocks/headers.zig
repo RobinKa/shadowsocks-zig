@@ -19,6 +19,7 @@ fn DecodeResultWithDeinit(comptime T: type) type {
 }
 
 pub const FixedLengthRequestHeader = struct {
+    pub const size: usize = 11;
     type: u8,
     timestamp: u64,
     length: u16,
@@ -194,8 +195,8 @@ test "encode FixedLengthRequestHeader" {
     var buffer: [100]u8 = undefined;
     const bytes_written = try header.encode(&buffer);
 
-    try std.testing.expectEqual(@as(usize, 11), bytes_written);
-    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0, 0, 0, 0, 0, 123, 0, 33 }, buffer[0..11]);
+    try std.testing.expectEqual(FixedLengthRequestHeader.size, bytes_written);
+    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0, 0, 0, 0, 0, 123, 0, 33 }, buffer[0..FixedLengthRequestHeader.size]);
 }
 
 test "decode FixedLengthRequestHeader" {
@@ -203,7 +204,7 @@ test "decode FixedLengthRequestHeader" {
 
     const decoded = try FixedLengthRequestHeader.decode(&buffer);
 
-    try std.testing.expectEqual(@as(usize, 11), decoded.bytes_read);
+    try std.testing.expectEqual(@as(usize, FixedLengthRequestHeader.size), decoded.bytes_read);
     try std.testing.expectEqual(@as(u8, 0), decoded.result.type);
     try std.testing.expectEqual(@as(u64, 123), decoded.result.timestamp);
     try std.testing.expectEqual(@as(u16, 33), decoded.result.length);
@@ -269,8 +270,12 @@ test "encode FixedLengthResponseHeader" {
     var buffer: [100]u8 = undefined;
     const bytes_written = try header.encode(&buffer);
 
-    try std.testing.expectEqual(@as(usize, 43), bytes_written);
-    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0, 0, 0, 0, 0, 123, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 0, 33 }, buffer[0..43]);
+    try std.testing.expectEqual(@as(usize, FixedLengthResponseHeader(32).size), bytes_written);
+    try std.testing.expectEqualSlices(
+        u8,
+        &.{ 0, 0, 0, 0, 0, 0, 0, 0, 123, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 0, 33 },
+        buffer[0..FixedLengthResponseHeader(32).size],
+    );
 }
 
 test "decode FixedLengthResponseHeader" {
@@ -278,9 +283,13 @@ test "decode FixedLengthResponseHeader" {
 
     const decoded = try FixedLengthResponseHeader(32).decode(&buffer);
 
-    try std.testing.expectEqual(@as(usize, 43), decoded.bytes_read);
+    try std.testing.expectEqual(@as(usize, FixedLengthResponseHeader(32).size), decoded.bytes_read);
     try std.testing.expectEqual(@as(u8, 0), decoded.result.type);
     try std.testing.expectEqual(@as(u64, 123), decoded.result.timestamp);
-    try std.testing.expectEqualSlices(u8, &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 }, &decoded.result.salt);
+    try std.testing.expectEqualSlices(
+        u8,
+        &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 },
+        &decoded.result.salt,
+    );
     try std.testing.expectEqual(@as(u16, 33), decoded.result.length);
 }

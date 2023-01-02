@@ -99,7 +99,7 @@ pub fn Server(comptime TCrypto: type) type {
 
         fn handleWaitForFixed(state: *ClientState, server_state: *ServerState) !bool {
             // Initial request needs to have at least the fixed length header
-            if (state.recv_buffer.items.len < TCrypto.salt_length + 11 + TCrypto.tag_length) {
+            if (state.recv_buffer.items.len < TCrypto.salt_length + headers.FixedLengthRequestHeader.size + TCrypto.tag_length) {
                 return Error.InitialRequestTooSmall;
             }
 
@@ -117,9 +117,9 @@ pub fn Server(comptime TCrypto: type) type {
                 .key = TCrypto.deriveSessionSubkeyWithSalt(state.key, state.request_salt),
             };
 
-            var decrypted: [11]u8 = undefined;
+            var decrypted: [headers.FixedLengthRequestHeader.size]u8 = undefined;
             try readContent(
-                state.recv_buffer.items[TCrypto.salt_length .. TCrypto.salt_length + 11 + TCrypto.tag_length],
+                state.recv_buffer.items[TCrypto.salt_length .. TCrypto.salt_length + headers.FixedLengthRequestHeader.size + TCrypto.tag_length],
                 &decrypted,
                 &state.request_decryptor,
             );
@@ -134,7 +134,7 @@ pub fn Server(comptime TCrypto: type) type {
             state.length = decoded.result.length;
             state.status = .wait_for_variable;
 
-            try state.recv_buffer.replaceRange(0, TCrypto.salt_length + 11 + TCrypto.tag_length, &.{});
+            try state.recv_buffer.replaceRange(0, TCrypto.salt_length + headers.FixedLengthRequestHeader.size + TCrypto.tag_length, &.{});
 
             return true;
         }

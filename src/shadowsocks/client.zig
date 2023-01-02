@@ -81,10 +81,10 @@ pub fn Client(comptime TCrypto: type) type {
                 .length = @intCast(u16, encoded_variable_header_size),
             };
 
-            var encoded_fixed_header: [11]u8 = undefined;
+            var encoded_fixed_header: [headers.FixedLengthRequestHeader.size]u8 = undefined;
             _ = try fixed_header.encode(&encoded_fixed_header);
 
-            var encrypted_fixed_header: [11]u8 = undefined;
+            var encrypted_fixed_header: [headers.FixedLengthRequestHeader.size]u8 = undefined;
             var encrypted_fixed_header_tag: [TCrypto.tag_length]u8 = undefined;
             request_encryptor.encrypt(&encoded_fixed_header, &encrypted_fixed_header, &encrypted_fixed_header_tag);
 

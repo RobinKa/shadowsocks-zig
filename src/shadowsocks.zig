@@ -33,7 +33,7 @@ test "FixedLengthRequestHeader - derive, encode, encrypt, decrypt, decode" {
             .length = 33,
         };
 
-        var encoded: [11]u8 = undefined;
+        var encoded: [headers.FixedLengthRequestHeader.size]u8 = undefined;
         _ = try header.encode(&encoded);
 
         var encrypted: [encoded.len]u8 = undefined;
@@ -45,7 +45,7 @@ test "FixedLengthRequestHeader - derive, encode, encrypt, decrypt, decode" {
 
         const decoded = try headers.FixedLengthRequestHeader.decode(&decrypted);
 
-        try std.testing.expectEqual(@as(usize, 11), decoded.bytes_read);
+        try std.testing.expectEqual(@as(usize, headers.FixedLengthRequestHeader.size), decoded.bytes_read);
         try std.testing.expectEqual(header.length, decoded.result.length);
         try std.testing.expectEqual(header.timestamp, decoded.result.timestamp);
         try std.testing.expectEqual(header.type, decoded.result.type);
