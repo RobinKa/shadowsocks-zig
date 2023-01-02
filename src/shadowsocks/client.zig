@@ -21,7 +21,12 @@ pub const Client = struct {
     state: ClientState = .wait_header,
     received_payload: std.ArrayList(u8),
 
-    pub fn connect(address: [4]u8, port: u16, remote_name: []const u8, remote_port: u16, key: [32]u8, initial_payload: []const u8) !@This() {
+    pub fn deinit(self: @This()) void {
+        self.received_payload.deinit();
+        self.recv_buffer.deinit();
+    }
+
+    pub fn connect(address: [4]u8, port: u16, remote_name: []const u8, remote_port: u16, key: [32]u8, initial_payload: []const u8, allocator: std.mem.Allocator) !@This() {
         var socket = try network.Socket.create(.ipv4, .tcp);
 
         try socket.connect(.{
@@ -38,7 +43,7 @@ pub const Client = struct {
         var request_session_subkey: [32]u8 = undefined;
 
         {
-            var key_and_request_salt = std.ArrayList(u8).init(std.heap.page_allocator);
+            var key_and_request_salt = std.ArrayList(u8).init(allocator);
             defer key_and_request_salt.deinit();
             try key_and_request_salt.appendSlice(&key);
             try key_and_request_salt.appendSlice(&request_salt);
@@ -50,18 +55,18 @@ pub const Client = struct {
         };
 
         const padding_length = if (initial_payload.len == 0) std.rand.Random.intRangeLessThan(prng.random(), u16, 1, 901) else 0;
-        var padding = try std.heap.page_allocator.alloc(u8, padding_length);
-        defer std.heap.page_allocator.free(padding);
+        var padding = try allocator.alloc(u8, padding_length);
+        defer allocator.free(padding);
         if (padding_length > 0) {
             prng.fill(padding);
         }
 
-        var remote_name_mutable = try std.heap.page_allocator.alloc(u8, remote_name.len);
-        defer std.heap.page_allocator.free(remote_name_mutable);
+        var remote_name_mutable = try allocator.alloc(u8, remote_name.len);
+        defer allocator.free(remote_name_mutable);
         std.mem.copy(u8, remote_name_mutable, remote_name);
 
-        var initial_payload_mutable = try std.heap.page_allocator.alloc(u8, initial_payload.len);
-        defer std.heap.page_allocator.free(initial_payload_mutable);
+        var initial_payload_mutable = try allocator.alloc(u8, initial_payload.len);
+        defer allocator.free(initial_payload_mutable);
         std.mem.copy(u8, initial_payload_mutable, initial_payload);
 
         const variable_header = headers.VariableLengthRequestHeader{
@@ -93,7 +98,9 @@ pub const Client = struct {
         var encrypted_variable_header_tag: [16]u8 = undefined;
         request_encryptor.encrypt(encoded_variable_header[0..encoded_variable_header_size], encrypted_variable_header[0..encoded_variable_header_size], &encrypted_variable_header_tag);
 
-        var send_buffer = try std.ArrayList(u8).initCapacity(std.heap.page_allocator, 1024);
+        var send_buffer = try std.ArrayList(u8).initCapacity(allocator, 1024);
+        defer send_buffer.deinit();
+
         try send_buffer.appendSlice(&request_salt);
         try send_buffer.appendSlice(&encrypted_fixed_header);
         try send_buffer.appendSlice(&encrypted_fixed_header_tag);
@@ -111,12 +118,12 @@ pub const Client = struct {
             .socket = socket,
             .key = key,
             .request_encryptor = request_encryptor,
-            .received_payload = std.ArrayList(u8).init(std.heap.page_allocator),
-            .recv_buffer = std.ArrayList(u8).init(std.heap.page_allocator),
+            .received_payload = std.ArrayList(u8).init(allocator),
+            .recv_buffer = std.ArrayList(u8).init(allocator),
         };
     }
 
-    fn waitHeader(self: *@This()) !bool {
+    fn waitHeader(self: *@This(), allocator: std.mem.Allocator) !bool {
         if (self.recv_buffer.items.len < 32 + 43 + 16) {
             return false;
         }
@@ -124,7 +131,7 @@ pub const Client = struct {
         std.mem.copy(u8, &self.response_salt, self.recv_buffer.items[0..32]);
 
         {
-            var key_and_response_salt = std.ArrayList(u8).init(std.heap.page_allocator);
+            var key_and_response_salt = std.ArrayList(u8).init(allocator);
             defer key_and_response_salt.deinit();
             try key_and_response_salt.appendSlice(&self.key);
             try key_and_response_salt.appendSlice(&self.response_salt);
@@ -175,7 +182,7 @@ pub const Client = struct {
         return true;
     }
 
-    fn waitPayload(self: *@This()) !bool {
+    fn waitPayload(self: *@This(), allocator: std.mem.Allocator) !bool {
         if (self.recv_buffer.items.len < self.next_length + 16) {
             return false;
         }
@@ -183,8 +190,8 @@ pub const Client = struct {
         const encrypted_payload = self.recv_buffer.items[0..self.next_length];
         var encrypted_payload_tag: [16]u8 = undefined;
         std.mem.copy(u8, &encrypted_payload_tag, self.recv_buffer.items[self.next_length .. self.next_length + 16]);
-        var payload = try std.heap.page_allocator.alloc(u8, encrypted_payload.len);
-        defer std.heap.page_allocator.free(payload);
+        var payload = try allocator.alloc(u8, encrypted_payload.len);
+        defer allocator.free(payload);
 
         try self.response_decryptor.decrypt(payload, encrypted_payload, encrypted_payload_tag);
 
@@ -196,7 +203,7 @@ pub const Client = struct {
         return true;
     }
 
-    fn getPacket(self: *@This(), data: []u8) !usize {
+    fn getPacket(self: *@This(), data: []u8, allocator: std.mem.Allocator) !usize {
         while (true) {
             if (self.received_payload.items.len > 0) {
                 const count = std.math.min(self.received_payload.items.len, data.len);
@@ -207,7 +214,7 @@ pub const Client = struct {
 
             switch (self.state) {
                 .wait_header => {
-                    if (!try self.waitHeader()) {
+                    if (!try self.waitHeader(allocator)) {
                         return 0;
                     }
                 },
@@ -217,7 +224,7 @@ pub const Client = struct {
                     }
                 },
                 .wait_payload => {
-                    if (!try self.waitPayload()) {
+                    if (!try self.waitPayload(allocator)) {
                         return 0;
                     }
                 },
@@ -225,8 +232,8 @@ pub const Client = struct {
         }
     }
 
-    pub fn receive(self: *@This(), data: []u8) !usize {
-        var payload_size = try self.getPacket(data);
+    pub fn receive(self: *@This(), data: []u8, allocator: std.mem.Allocator) !usize {
+        var payload_size = try self.getPacket(data, allocator);
         if (payload_size > 0) {
             return payload_size;
         }
@@ -237,15 +244,15 @@ pub const Client = struct {
             std.debug.print("s->c {d}\n", .{received});
             try self.recv_buffer.appendSlice(buffer[0..received]);
 
-            payload_size = try self.getPacket(data);
+            payload_size = try self.getPacket(data, allocator);
             if (payload_size > 0) {
                 return payload_size;
             }
         }
     }
 
-    pub fn send(self: *@This(), data: []const u8) !usize {
-        var send_buffer = try std.ArrayList(u8).initCapacity(std.heap.page_allocator, 2 + 16 + data.len + 16);
+    pub fn send(self: *@This(), data: []const u8, allocator: std.mem.Allocator) !usize {
+        var send_buffer = try std.ArrayList(u8).initCapacity(allocator, 2 + 16 + data.len + 16);
         defer send_buffer.deinit();
 
         {
@@ -262,8 +269,8 @@ pub const Client = struct {
         }
 
         {
-            var encrypted_data: []u8 = try std.heap.page_allocator.alloc(u8, data.len);
-            defer std.heap.page_allocator.free(encrypted_data);
+            var encrypted_data: []u8 = try allocator.alloc(u8, data.len);
+            defer allocator.free(encrypted_data);
 
             var tag: [16]u8 = undefined;
             self.request_encryptor.encrypt(data, encrypted_data, &tag);

@@ -40,12 +40,13 @@ test "client send initial payload" {
 
     const initial_payload = "GET / HTTP/1.1\r\nHost: eu.httpbin.org\r\n\r\n";
 
-    var client = try shadowsocks_client.Client.connect(.{ 127, 0, 0, 1 }, port, "eu.httpbin.org", 80, key, initial_payload);
+    var client = try shadowsocks_client.Client.connect(.{ 127, 0, 0, 1 }, port, "eu.httpbin.org", 80, key, initial_payload, std.testing.allocator);
+    defer client.deinit();
 
     var recv_buffer: [1024]u8 = undefined;
     var total_received: usize = 0;
     while (total_received < 9593) {
-        const recv_count = try client.receive(&recv_buffer);
+        const recv_count = try client.receive(&recv_buffer, std.testing.allocator);
 
         if (total_received == 0) {
             const expected = "HTTP/1.1 200 OK\r\n";
@@ -64,16 +65,17 @@ test "client send non-initial payload" {
     _ = try std.Thread.spawn(.{}, runProxyServer, .{ port, &key });
     try waitCanConnect(port);
 
-    var client = try shadowsocks_client.Client.connect(.{ 127, 0, 0, 1 }, port, "eu.httpbin.org", 80, key, &.{});
+    var client = try shadowsocks_client.Client.connect(.{ 127, 0, 0, 1 }, port, "eu.httpbin.org", 80, key, &.{}, std.testing.allocator);
+    defer client.deinit();
 
     const payload = "GET / HTTP/1.1\r\nHost: eu.httpbin.org\r\n\r\n";
-    var sent = try client.send(payload);
+    var sent = try client.send(payload, std.testing.allocator);
     try std.testing.expectEqual(payload.len, sent);
 
     var recv_buffer: [1024]u8 = undefined;
     var total_received: usize = 0;
     while (total_received < 9593) {
-        const recv_count = try client.receive(&recv_buffer);
+        const recv_count = try client.receive(&recv_buffer, std.testing.allocator);
 
         if (total_received == 0) {
             const expected = "HTTP/1.1 200 OK\r\n";
