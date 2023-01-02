@@ -87,8 +87,8 @@ fn startMitmProxy(
     }
 }
 
-fn runProxyServer(comptime TCrypto: type, port: u16, key: [TCrypto.key_length]u8) !void {
-    try shadowsocks_server.Server(TCrypto).start(port, key, std.heap.page_allocator);
+fn runProxyServer(comptime TCrypto: type, port: u16, key: [TCrypto.key_length]u8, allocator: std.mem.Allocator) !shadowsocks_server.Server(TCrypto) {
+    return try shadowsocks_server.Server(TCrypto).start(port, key, allocator);
 }
 
 fn waitCanConnect(port: u16) !void {
@@ -118,7 +118,9 @@ fn clientSendInitialPayloadTest(comptime TCrypto: type, encoded_key: []const u8,
     var key: [TCrypto.key_length]u8 = undefined;
     try std.base64.standard.Decoder.decode(&key, encoded_key);
 
-    _ = try std.Thread.spawn(.{}, runProxyServer, .{ TCrypto, port, key });
+    var server = try runProxyServer(TCrypto, port, key, std.testing.allocator);
+    defer server.stop();
+
     try waitCanConnect(port);
 
     const initial_payload = "GET / HTTP/1.1\r\nHost: eu.httpbin.org\r\n\r\n";
@@ -165,7 +167,9 @@ test "client send non-initial payload - Blake3Aes256Gcm" {
     var key: [32]u8 = undefined;
     try std.base64.standard.Decoder.decode(&key, "AcxUIVEsMN7a5bk2swV8uCFb9MGkY5pZumaStQ4CVKc=");
 
-    _ = try std.Thread.spawn(.{}, runProxyServer, .{ crypto.Blake3Aes256Gcm, port, key });
+    var server = try runProxyServer(crypto.Blake3Aes256Gcm, port, key, std.testing.allocator);
+    defer server.stop();
+
     try waitCanConnect(port);
 
     var client = try shadowsocks_client.Client(crypto.Blake3Aes256Gcm).connect(.{ 127, 0, 0, 1 }, port, "eu.httpbin.org", 80, key, &.{}, std.testing.allocator);
@@ -209,7 +213,8 @@ test "MITM replay fails - Blake3Aes256Gcm" {
     // Start Shadowsocks proxy
     var key: [32]u8 = undefined;
     try std.base64.standard.Decoder.decode(&key, "AcxUIVEsMN7a5bk2swV8uCFb9MGkY5pZumaStQ4CVKc=");
-    _ = try std.Thread.spawn(.{}, runProxyServer, .{ crypto.Blake3Aes256Gcm, proxy_port, key });
+    var server = try runProxyServer(crypto.Blake3Aes256Gcm, proxy_port, key, std.testing.allocator);
+    defer server.stop();
     try waitCanConnect(proxy_port);
 
     // Proxy original http request

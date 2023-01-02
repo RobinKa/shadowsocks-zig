@@ -77,6 +77,7 @@ pub fn Server(comptime TCrypto: type) type {
 
             fn deinit(self: @This()) void {
                 self.remote_socket.close();
+                self.recv_buffer.deinit();
             }
         };
 
@@ -123,14 +124,14 @@ pub fn Server(comptime TCrypto: type) type {
                 &state.request_decryptor,
             );
 
-            const decoded_header = (try headers.FixedLengthRequestHeader.decode(&decrypted)).result;
+            const decoded = try headers.FixedLengthRequestHeader.decode(&decrypted);
 
             // Detect replay attacks by checking for old timestamps
-            if (@intCast(u64, std.time.timestamp()) > decoded_header.timestamp + 30) {
+            if (@intCast(u64, std.time.timestamp()) > decoded.result.timestamp + 30) {
                 return Error.TimestampTooOld;
             }
 
-            state.length = decoded_header.length;
+            state.length = decoded.result.length;
             state.status = .wait_for_variable;
 
             try state.recv_buffer.replaceRange(0, TCrypto.salt_length + 11 + TCrypto.tag_length, &.{});
@@ -148,24 +149,25 @@ pub fn Server(comptime TCrypto: type) type {
 
             try readContent(state.recv_buffer.items[0 .. state.length + TCrypto.tag_length], decrypted, &state.request_decryptor);
 
-            const decoded_header = (try headers.VariableLengthRequestHeader.decode(decrypted, state.length, allocator)).result;
+            const decoded = try headers.VariableLengthRequestHeader.decode(decrypted, state.length, allocator);
+            defer decoded.deinit();
 
-            if (decoded_header.padding.len == 0 and decoded_header.initial_payload.len == 0) {
+            if (decoded.result.padding.len == 0 and decoded.result.initial_payload.len == 0) {
                 return Error.NoInitialPayloadOrPadding;
             }
 
-            switch (decoded_header.address_type) {
+            switch (decoded.result.address_type) {
                 1 => {
-                    const address = decoded_header.address[0..4];
+                    const address = decoded.result.address[0..4];
 
                     try state.remote_socket.connect(.{
                         .address = .{ .ipv4 = .{ .value = address.* } },
-                        .port = decoded_header.port,
+                        .port = decoded.result.port,
                     });
                 },
                 3 => {
-                    const name = decoded_header.address;
-                    const endpoint_list = try network.getEndpointList(allocator, name, decoded_header.port);
+                    const name = decoded.result.address;
+                    const endpoint_list = try network.getEndpointList(allocator, name, decoded.result.port);
                     defer endpoint_list.deinit();
 
                     state.remote_socket.close();
@@ -188,11 +190,11 @@ pub fn Server(comptime TCrypto: type) type {
                     }
                 },
                 4 => {
-                    const address = decoded_header.address[0..16];
+                    const address = decoded.result.address[0..16];
 
                     try state.remote_socket.connect(.{
                         .address = .{ .ipv6 = network.Address.IPv6.init(address.*, 0) },
-                        .port = decoded_header.port,
+                        .port = decoded.result.port,
                     });
                 },
                 else => {
@@ -206,8 +208,8 @@ pub fn Server(comptime TCrypto: type) type {
             });
 
             var total_sent: usize = 0;
-            while (total_sent < decoded_header.initial_payload.len) {
-                const sent = try state.remote_socket.send(decoded_header.initial_payload[total_sent..]);
+            while (total_sent < decoded.result.initial_payload.len) {
+                const sent = try state.remote_socket.send(decoded.result.initial_payload[total_sent..]);
                 logger.debug("s->r {d}", .{sent});
 
                 if (sent == 0) {
@@ -345,7 +347,7 @@ pub fn Server(comptime TCrypto: type) type {
             socket.close();
         }
 
-        fn handleClient(socket: network.Socket, server_state: *ServerState, allocator: std.mem.Allocator) !void {
+        fn handleClient(should_stop: *bool, socket: network.Socket, server_state: *ServerState, allocator: std.mem.Allocator) !void {
             var socket_set = try network.SocketSet.init(allocator);
             defer socket_set.deinit();
 
@@ -358,8 +360,8 @@ pub fn Server(comptime TCrypto: type) type {
             });
 
             var buffer: [1024]u8 = undefined;
-            while (true) {
-                _ = try network.waitForSocketEvent(state.socket_set, null);
+            while (!should_stop.*) {
+                _ = try network.waitForSocketEvent(state.socket_set, std.time.ns_per_ms);
 
                 // Buffer data sent from client to server
                 if (state.socket_set.isReadyRead(state.socket)) {
@@ -405,8 +407,8 @@ pub fn Server(comptime TCrypto: type) type {
             }
         }
 
-        fn handleClientCatchAll(socket: network.Socket, server_state: *ServerState, on_error: anytype, allocator: std.mem.Allocator) void {
-            handleClient(socket, server_state, allocator) catch |err| {
+        fn handleClientCatchAll(should_stop: *bool, socket: network.Socket, server_state: *ServerState, on_error: anytype, allocator: std.mem.Allocator) void {
+            handleClient(should_stop, socket, server_state, allocator) catch |err| {
                 if (err != Error.ClientDisconnected and err != Error.RemoteDisconnected) {
                     closeSocketWithRst(socket);
                 } else {
@@ -421,7 +423,7 @@ pub fn Server(comptime TCrypto: type) type {
             logger.info("client terminated: {s}", .{@errorName(err)});
         }
 
-        pub fn start(port: u16, key: [TCrypto.key_length]u8, allocator: std.mem.Allocator) !void {
+        fn start_internal(should_stop: *bool, port: u16, key: [TCrypto.key_length]u8, allocator: std.mem.Allocator) !void {
             var socket = try network.Socket.create(.ipv4, .tcp);
             defer socket.close();
             try socket.bindToPort(port);
@@ -430,16 +432,60 @@ pub fn Server(comptime TCrypto: type) type {
             var server_state = ServerState.init(key, allocator);
             defer server_state.deinit();
 
+            var socket_set = try network.SocketSet.init(allocator);
+            defer socket_set.deinit();
+
+            try socket_set.add(socket, .{ .read = true, .write = false });
+
             logger.info("Listening on port {d}", .{port});
 
-            while (true) {
-                var client = try socket.accept();
-                logger.info("Accepted new client", .{});
+            var client_threads = std.ArrayList(std.Thread).init(allocator);
+            defer client_threads.deinit();
 
-                (try std.Thread.spawn(.{}, handleClientCatchAll, .{ client, &server_state, onClientError, allocator })).detach();
+            while (!should_stop.*) {
+                _ = try network.waitForSocketEvent(&socket_set, std.time.ns_per_ms);
+
+                if (socket_set.isReadyRead(socket)) {
+                    var client = try socket.accept();
+                    logger.info("Accepted new client", .{});
+
+                    try client_threads.append(try std.Thread.spawn(
+                        .{},
+                        handleClientCatchAll,
+                        .{ should_stop, client, &server_state, onClientError, allocator },
+                    ));
+                }
             }
 
-            unreachable;
+            for (client_threads.items) |client_thread| {
+                client_thread.join();
+            }
+        }
+
+        should_stop: *bool,
+        thread: std.Thread,
+        allocator: std.mem.Allocator,
+
+        pub fn start(port: u16, key: [TCrypto.key_length]u8, allocator: std.mem.Allocator) !@This() {
+            var should_stop = try allocator.create(bool);
+            var thread = try std.Thread.spawn(.{}, start_internal, .{ should_stop, port, key, allocator });
+
+            return .{
+                .thread = thread,
+                .should_stop = should_stop,
+                .allocator = allocator,
+            };
+        }
+
+        pub fn start_blocking(port: u16, key: [TCrypto.key_length]u8, allocator: std.mem.Allocator) !void {
+            var should_stop = false;
+            try start_internal(&should_stop, port, key, allocator);
+        }
+
+        pub fn stop(self: *@This()) void {
+            self.should_stop.* = true;
+            self.thread.join();
+            self.allocator.destroy(self.should_stop);
         }
     };
 }
