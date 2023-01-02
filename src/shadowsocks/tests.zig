@@ -4,6 +4,8 @@ const shadowsocks_client = @import("client.zig");
 const shadowsocks_server = @import("server.zig");
 const crypto = @import("crypto.zig");
 
+const logger = std.log.scoped(.shadowsocks_test);
+
 const MitmData = struct {
     sent: std.ArrayList(u8),
     received: std.ArrayList(u8),
@@ -103,7 +105,7 @@ fn waitCanConnect(port: u16) !void {
             if (retries >= 5) {
                 return error.CantConnectToRemote;
             }
-            std.debug.print("Failed to connect on attempt {d}, retrying\n", .{retries});
+            logger.info("Failed to connect on attempt {d}, retrying", .{retries});
             std.time.sleep(std.time.ns_per_s);
             continue;
         };

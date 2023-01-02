@@ -3,6 +3,8 @@ const network = @import("network");
 const headers = @import("headers.zig");
 const crypto = @import("crypto.zig");
 
+const logger = std.log.scoped(.shadowsocks_client);
+
 pub fn Client(comptime TCrypto: type) type {
     const ClientState = enum {
         wait_header,
@@ -114,7 +116,7 @@ pub fn Client(comptime TCrypto: type) type {
             var total_sent: usize = 0;
             while (total_sent < send_buffer.items.len) {
                 const sent = try socket.send(send_buffer.items);
-                std.debug.print("c->s {d}\n", .{sent});
+                logger.info("c->s {d}", .{sent});
                 total_sent += sent;
             }
 
@@ -241,7 +243,7 @@ pub fn Client(comptime TCrypto: type) type {
             while (true) {
                 var buffer: [1024]u8 = undefined;
                 var received = try self.socket.receive(&buffer);
-                std.debug.print("s->c {d}\n", .{received});
+                logger.info("s->c {d}", .{received});
                 try self.recv_buffer.appendSlice(buffer[0..received]);
 
                 payload_size = try self.getPacket(data, allocator);
@@ -282,7 +284,7 @@ pub fn Client(comptime TCrypto: type) type {
             var total_sent: usize = 0;
             while (total_sent < send_buffer.items.len) {
                 const sent = try self.socket.send(send_buffer.items[total_sent..]);
-                std.debug.print("c->s {d}\n", .{sent});
+                logger.info("c->s {d}", .{sent});
                 total_sent += sent;
             }
 

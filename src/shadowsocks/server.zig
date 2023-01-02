@@ -4,6 +4,8 @@ const crypto = @import("crypto.zig");
 const headers = @import("headers.zig");
 const salts = @import("salts.zig");
 
+const logger = std.log.scoped(.shadowsocks_server);
+
 pub fn Server(comptime TCrypto: type) type {
     return struct {
         fn readContent(buffer: []const u8, content: []u8, encryptor: *TCrypto.Encryptor) !void {
@@ -206,7 +208,7 @@ pub fn Server(comptime TCrypto: type) type {
             var total_sent: usize = 0;
             while (total_sent < decoded_header.initial_payload.len) {
                 const sent = try state.remote_socket.send(decoded_header.initial_payload[total_sent..]);
-                std.debug.print("s->r {d}\n", .{sent});
+                logger.debug("s->r {d}", .{sent});
 
                 if (sent == 0) {
                     return ShadowsocksError.ClientDisconnected;
@@ -251,7 +253,7 @@ pub fn Server(comptime TCrypto: type) type {
             var total_sent: usize = 0;
             while (total_sent < decrypted.len) {
                 const sent = try state.remote_socket.send(decrypted[total_sent..]);
-                std.debug.print("s->r {d}\n", .{sent});
+                logger.debug("s->r {d}", .{sent});
 
                 if (sent == 0) {
                     return ShadowsocksError.ClientDisconnected;
@@ -315,7 +317,7 @@ pub fn Server(comptime TCrypto: type) type {
             var total_sent: usize = 0;
             while (total_sent < send_buffer.items.len) {
                 const sent = try state.socket.send(send_buffer.items[total_sent..]);
-                std.debug.print("s->r {d}\n", .{sent});
+                logger.debug("s->r {d}", .{sent});
 
                 if (sent == 0) {
                     return ShadowsocksError.RemoteDisconnected;
@@ -337,7 +339,7 @@ pub fn Server(comptime TCrypto: type) type {
             };
 
             std.os.setsockopt(socket.internal, std.os.SOL.SOCKET, std.os.SO.LINGER, std.mem.asBytes(&value)) catch |err| {
-                std.debug.print("Failed to set SO_LINGER: {s}", .{@errorName(err)});
+                logger.err("Failed to set SO_LINGER: {s}", .{@errorName(err)});
             };
 
             socket.close();
@@ -362,7 +364,7 @@ pub fn Server(comptime TCrypto: type) type {
                 // Buffer data sent from client to server
                 if (state.socket_set.isReadyRead(state.socket)) {
                     const count = try state.socket.receive(&buffer);
-                    std.debug.print("c->s {d}\n", .{count});
+                    logger.debug("c->s {d}", .{count});
 
                     if (count == 0) {
                         return ShadowsocksError.ClientDisconnected;
@@ -374,7 +376,7 @@ pub fn Server(comptime TCrypto: type) type {
                 // Forward data sent from remote to server to client
                 if (state.socket_set.isReadyRead(state.remote_socket)) {
                     const count = try state.remote_socket.receive(&buffer);
-                    std.debug.print("r->s {d}\n", .{count});
+                    logger.debug("r->s {d}", .{count});
 
                     if (count == 0) {
                         return ShadowsocksError.RemoteDisconnected;
@@ -416,7 +418,7 @@ pub fn Server(comptime TCrypto: type) type {
         }
 
         fn onClientError(err: anytype) void {
-            std.debug.print("client terminated: {s}\n", .{@errorName(err)});
+            logger.info("client terminated: {s}", .{@errorName(err)});
         }
 
         pub fn start(port: u16, key: [TCrypto.key_length]u8, allocator: std.mem.Allocator) !void {
@@ -428,16 +430,16 @@ pub fn Server(comptime TCrypto: type) type {
             var server_state = ServerState.init(key, allocator);
             defer server_state.deinit();
 
-            std.debug.print("Listening on port {d}\n", .{port});
+            logger.info("Listening on port {d}", .{port});
 
             while (true) {
                 var client = try socket.accept();
-                std.debug.print("Accepted new client\n", .{});
+                logger.info("Accepted new client", .{});
 
                 (try std.Thread.spawn(.{}, handleClientCatchAll, .{ client, &server_state, onClientError, allocator })).detach();
             }
 
-            std.debug.print("Done", .{});
+            unreachable;
         }
     };
 }

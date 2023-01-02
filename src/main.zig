@@ -3,6 +3,8 @@ const network = @import("network");
 const shadowsocks = @import("shadowsocks.zig");
 const config = @import("config.zig");
 
+const logger = std.log.scoped(.main);
+
 fn getConfig(allocator: std.mem.Allocator) !config.Config {
     var arg_it = try std.process.argsWithAllocator(allocator);
     defer arg_it.deinit();
@@ -53,10 +55,10 @@ pub fn main() !void {
 
     const cfg: config.Config = try getConfig(allocator);
 
-    std.debug.print("Starting with port {d} and encryption method {s}\n", .{ cfg.port, cfg.method });
+    logger.info("Starting with port {d} and encryption method {s}", .{ cfg.port, cfg.method });
 
     startServerFromConfig(cfg, allocator) catch |err| {
-        std.debug.print("Server failed, error: {s}\n", .{@errorName(err)});
+        logger.err("Server failed, error: {s}", .{@errorName(err)});
     };
 }
 
