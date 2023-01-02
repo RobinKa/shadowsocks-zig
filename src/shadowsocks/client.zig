@@ -63,27 +63,13 @@ pub fn Client(comptime TCrypto: type) type {
             };
 
             const padding_length = if (initial_payload.len == 0) std.rand.Random.intRangeLessThan(prng.random(), u16, 1, 901) else 0;
-            var padding = try allocator.alloc(u8, padding_length);
-            defer allocator.free(padding);
-            if (padding_length > 0) {
-                prng.fill(padding);
-            }
-
-            var remote_name_mutable = try allocator.alloc(u8, remote_name.len);
-            defer allocator.free(remote_name_mutable);
-            std.mem.copy(u8, remote_name_mutable, remote_name);
-
-            var initial_payload_mutable = try allocator.alloc(u8, initial_payload.len);
-            defer allocator.free(initial_payload_mutable);
-            std.mem.copy(u8, initial_payload_mutable, initial_payload);
 
             const variable_header = headers.VariableLengthRequestHeader{
                 .address_type = 3,
-                .address = remote_name_mutable,
+                .address = remote_name,
                 .port = remote_port,
                 .padding_length = padding_length,
-                .padding = padding,
-                .initial_payload = initial_payload_mutable,
+                .initial_payload = initial_payload,
             };
 
             var encoded_variable_header: [1024]u8 = undefined;

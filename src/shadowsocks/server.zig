@@ -152,7 +152,7 @@ pub fn Server(comptime TCrypto: type) type {
             const decoded = try headers.VariableLengthRequestHeader.decode(decrypted, state.length, allocator);
             defer decoded.deinit();
 
-            if (decoded.result.padding.len == 0 and decoded.result.initial_payload.len == 0) {
+            if (decoded.result.padding_length == 0 and decoded.result.initial_payload.len == 0) {
                 return Error.NoInitialPayloadOrPadding;
             }
 

@@ -51,18 +51,16 @@ pub const FixedLengthRequestHeader = struct {
 
 pub const VariableLengthRequestHeader = struct {
     address_type: u8,
-    address: []u8,
+    address: []const u8,
     port: u16,
     padding_length: u16,
-    padding: []u8,
-    initial_payload: []u8,
+    initial_payload: []const u8,
 
     allocator: ?std.mem.Allocator = null,
 
     pub fn deinit(self: @This()) void {
         if (self.allocator != null) {
             self.allocator.?.free(self.address);
-            self.allocator.?.free(self.padding);
             self.allocator.?.free(self.initial_payload);
         }
     }
@@ -78,31 +76,31 @@ pub const VariableLengthRequestHeader = struct {
             switch (address_type) {
                 1 => {
                     var addr: []u8 = try allocator.alloc(u8, 4);
+                    errdefer allocator.free(addr);
                     try reader.readNoEof(addr);
                     break :add addr;
                 },
                 3 => {
                     const address_length = try reader.readIntBig(u8);
                     var addr: []u8 = try allocator.alloc(u8, address_length);
+                    errdefer allocator.free(addr);
                     try reader.readNoEof(addr);
                     break :add addr;
                 },
                 4 => {
                     var addr: []u8 = try allocator.alloc(u8, 16);
+                    errdefer allocator.free(addr);
                     try reader.readNoEof(addr);
                     break :add addr;
                 },
                 else => unreachable,
             }
         };
-        errdefer allocator.free(address);
 
         const port = try reader.readIntBig(u16);
 
         const padding_length = try reader.readIntBig(u16);
-        var padding: []u8 = try allocator.alloc(u8, padding_length);
-        errdefer allocator.free(padding);
-        try reader.readNoEof(padding[0..padding_length]);
+        try reader.skipBytes(padding_length, .{});
 
         const remaining_length = length - (reader.context.pos - start_pos);
         var initial_payload = try allocator.alloc(u8, remaining_length);
@@ -115,7 +113,6 @@ pub const VariableLengthRequestHeader = struct {
                 .address = address,
                 .port = port,
                 .padding_length = padding_length,
-                .padding = padding,
                 .initial_payload = initial_payload,
                 .allocator = allocator,
             },
@@ -136,7 +133,7 @@ pub const VariableLengthRequestHeader = struct {
         _ = try writer.write(self.address);
         try writer.writeIntBig(u16, self.port);
         try writer.writeIntBig(u16, self.padding_length);
-        _ = try writer.write(self.padding);
+        try writer.writeByteNTimes(0, self.padding_length);
         _ = try writer.write(self.initial_payload);
 
         return stream.pos;
@@ -214,7 +211,6 @@ test "decode FixedLengthRequestHeader" {
 
 test "encode VariableLengthRequestHeader" {
     var address = [_]u8{ 1, 2, 3, 4 };
-    var padding = [_]u8{ 0, 0, 0, 0 };
     var initial_payload = [_]u8{ 5, 6, 7 };
 
     const header = VariableLengthRequestHeader{
@@ -222,7 +218,6 @@ test "encode VariableLengthRequestHeader" {
         .address = &address,
         .port = 56,
         .padding_length = 4,
-        .padding = &padding,
         .initial_payload = &initial_payload,
     };
     defer header.deinit();
@@ -246,7 +241,6 @@ test "decode VariableLengthRequestHeader" {
     try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4 }, decoded.result.address);
     try std.testing.expectEqual(@as(u16, 56), decoded.result.port);
     try std.testing.expectEqual(@as(u16, 4), decoded.result.padding_length);
-    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0 }, decoded.result.padding);
     try std.testing.expectEqualSlices(u8, &.{ 5, 6, 7 }, decoded.result.initial_payload);
 }
 
@@ -261,7 +255,6 @@ test "decode VariableLengthRequestHeader IPv6" {
     try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }, decoded.result.address);
     try std.testing.expectEqual(@as(u16, 56), decoded.result.port);
     try std.testing.expectEqual(@as(u16, 4), decoded.result.padding_length);
-    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0 }, decoded.result.padding);
     try std.testing.expectEqualSlices(u8, &.{ 5, 6, 7 }, decoded.result.initial_payload);
 }
 

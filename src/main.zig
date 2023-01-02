@@ -59,7 +59,3 @@ pub fn main() !void {
 
     try startServerFromConfig(cfg, allocator);
 }
-
-test {
-    _ = @import("shadowsocks.zig");
-}
