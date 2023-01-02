@@ -6,14 +6,20 @@ const crypto = @import("crypto.zig");
 const logger = std.log.scoped(.shadowsocks_client);
 
 pub fn Client(comptime TCrypto: type) type {
-    const ClientState = enum {
+    const State = enum {
         wait_header,
         wait_length,
         wait_payload,
     };
 
+    const Error = error{
+        SaltDoesNotMatch,
+        TimestampTooOld,
+    };
+
     return struct {
         socket: network.Socket,
+        request_salt: [TCrypto.salt_length]u8 = undefined,
         response_salt: [TCrypto.salt_length]u8 = undefined,
         initial_response_received: bool = false,
         recv_buffer: std.ArrayList(u8),
@@ -21,7 +27,7 @@ pub fn Client(comptime TCrypto: type) type {
         response_decryptor: TCrypto.Encryptor = undefined,
         key: [TCrypto.key_length]u8,
         next_length: u16 = undefined,
-        state: ClientState = .wait_header,
+        state: State = .wait_header,
         received_payload: std.ArrayList(u8),
 
         pub fn deinit(self: @This()) void {
@@ -116,13 +122,14 @@ pub fn Client(comptime TCrypto: type) type {
             var total_sent: usize = 0;
             while (total_sent < send_buffer.items.len) {
                 const sent = try socket.send(send_buffer.items);
-                logger.info("c->s {d}", .{sent});
+                logger.debug("c->s {d}", .{sent});
                 total_sent += sent;
             }
 
             return .{
                 .socket = socket,
                 .key = key,
+                .request_salt = request_salt,
                 .request_encryptor = request_encryptor,
                 .received_payload = std.ArrayList(u8).init(allocator),
                 .recv_buffer = std.ArrayList(u8).init(allocator),
@@ -154,8 +161,14 @@ pub fn Client(comptime TCrypto: type) type {
 
             const decoded = try THeader.decode(&encoded_response_header);
 
-            // TODO: check response_header.request_salt == self.request_salt
-            // TODO: check timestamp
+            if (!std.mem.eql(u8, &decoded.result.salt, &self.request_salt)) {
+                return Error.SaltDoesNotMatch;
+            }
+
+            // TODO: is this check really needed, since we already matched the request salt?
+            if (@intCast(u64, std.time.timestamp()) > decoded.result.timestamp + 30) {
+                return Error.TimestampTooOld;
+            }
 
             self.next_length = decoded.result.length;
             try self.recv_buffer.replaceRange(0, TCrypto.salt_length + THeader.size + TCrypto.tag_length, &.{});
@@ -243,7 +256,7 @@ pub fn Client(comptime TCrypto: type) type {
             while (true) {
                 var buffer: [1024]u8 = undefined;
                 var received = try self.socket.receive(&buffer);
-                logger.info("s->c {d}", .{received});
+                logger.debug("s->c {d}", .{received});
                 try self.recv_buffer.appendSlice(buffer[0..received]);
 
                 payload_size = try self.getPacket(data, allocator);
@@ -284,7 +297,7 @@ pub fn Client(comptime TCrypto: type) type {
             var total_sent: usize = 0;
             while (total_sent < send_buffer.items.len) {
                 const sent = try self.socket.send(send_buffer.items[total_sent..]);
-                logger.info("c->s {d}", .{sent});
+                logger.debug("c->s {d}", .{sent});
                 total_sent += sent;
             }
 

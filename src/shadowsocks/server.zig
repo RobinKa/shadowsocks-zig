@@ -8,6 +8,18 @@ const logger = std.log.scoped(.shadowsocks_server);
 
 pub fn Server(comptime TCrypto: type) type {
     return struct {
+        const Error = error{
+            InitialRequestTooSmall,
+            UnknownAddressType,
+            Unsupported,
+            CantConnectToRemote,
+            RemoteDisconnected,
+            ClientDisconnected,
+            DuplicateSalt,
+            NoInitialPayloadOrPadding,
+            TimestampTooOld,
+        };
+
         fn readContent(buffer: []const u8, content: []u8, encryptor: *TCrypto.Encryptor) !void {
             const encrypted = buffer[0 .. buffer.len - TCrypto.tag_length];
             var tag: [TCrypto.tag_length]u8 = undefined;
@@ -84,22 +96,10 @@ pub fn Server(comptime TCrypto: type) type {
             }
         };
 
-        const ShadowsocksError = error{
-            InitialRequestTooSmall,
-            UnknownAddressType,
-            Unsupported,
-            CantConnectToRemote,
-            RemoteDisconnected,
-            ClientDisconnected,
-            DuplicateSalt,
-            NoInitialPayloadOrPadding,
-            TimestampTooOld,
-        };
-
         fn handleWaitForFixed(state: *ClientState, server_state: *ServerState) !bool {
             // Initial request needs to have at least the fixed length header
             if (state.recv_buffer.items.len < TCrypto.salt_length + 11 + TCrypto.tag_length) {
-                return ShadowsocksError.InitialRequestTooSmall;
+                return Error.InitialRequestTooSmall;
             }
 
             std.mem.copy(u8, &state.request_salt, state.recv_buffer.items[0..TCrypto.salt_length]);
@@ -109,7 +109,7 @@ pub fn Server(comptime TCrypto: type) type {
             server_state.request_salt_cache.removeAfterTime(time + 60 * std.time.ms_per_s);
 
             if (!try server_state.request_salt_cache.maybeAdd(&state.request_salt, time)) {
-                return ShadowsocksError.DuplicateSalt;
+                return Error.DuplicateSalt;
             }
 
             state.request_decryptor = .{
@@ -127,7 +127,7 @@ pub fn Server(comptime TCrypto: type) type {
 
             // Detect replay attacks by checking for old timestamps
             if (@intCast(u64, std.time.timestamp()) > decoded_header.timestamp + 30) {
-                return ShadowsocksError.TimestampTooOld;
+                return Error.TimestampTooOld;
             }
 
             state.length = decoded_header.length;
@@ -151,7 +151,7 @@ pub fn Server(comptime TCrypto: type) type {
             const decoded_header = (try headers.VariableLengthRequestHeader.decode(decrypted, state.length, allocator)).result;
 
             if (decoded_header.padding.len == 0 and decoded_header.initial_payload.len == 0) {
-                return ShadowsocksError.NoInitialPayloadOrPadding;
+                return Error.NoInitialPayloadOrPadding;
             }
 
             switch (decoded_header.address_type) {
@@ -184,7 +184,7 @@ pub fn Server(comptime TCrypto: type) type {
                     }
 
                     if (!connected) {
-                        return ShadowsocksError.CantConnectToRemote;
+                        return Error.CantConnectToRemote;
                     }
                 },
                 4 => {
@@ -196,7 +196,7 @@ pub fn Server(comptime TCrypto: type) type {
                     });
                 },
                 else => {
-                    return ShadowsocksError.UnknownAddressType;
+                    return Error.UnknownAddressType;
                 },
             }
 
@@ -211,7 +211,7 @@ pub fn Server(comptime TCrypto: type) type {
                 logger.debug("s->r {d}", .{sent});
 
                 if (sent == 0) {
-                    return ShadowsocksError.ClientDisconnected;
+                    return Error.ClientDisconnected;
                 }
 
                 total_sent += sent;
@@ -256,7 +256,7 @@ pub fn Server(comptime TCrypto: type) type {
                 logger.debug("s->r {d}", .{sent});
 
                 if (sent == 0) {
-                    return ShadowsocksError.ClientDisconnected;
+                    return Error.ClientDisconnected;
                 }
 
                 total_sent += sent;
@@ -320,7 +320,7 @@ pub fn Server(comptime TCrypto: type) type {
                 logger.debug("s->r {d}", .{sent});
 
                 if (sent == 0) {
-                    return ShadowsocksError.RemoteDisconnected;
+                    return Error.RemoteDisconnected;
                 }
 
                 total_sent += sent;
@@ -367,7 +367,7 @@ pub fn Server(comptime TCrypto: type) type {
                     logger.debug("c->s {d}", .{count});
 
                     if (count == 0) {
-                        return ShadowsocksError.ClientDisconnected;
+                        return Error.ClientDisconnected;
                     }
 
                     try state.recv_buffer.appendSlice(buffer[0..count]);
@@ -379,7 +379,7 @@ pub fn Server(comptime TCrypto: type) type {
                     logger.debug("r->s {d}", .{count});
 
                     if (count == 0) {
-                        return ShadowsocksError.RemoteDisconnected;
+                        return Error.RemoteDisconnected;
                     }
 
                     try forwardToClient(&state, buffer[0..count], allocator);
@@ -407,7 +407,7 @@ pub fn Server(comptime TCrypto: type) type {
 
         fn handleClientCatchAll(socket: network.Socket, server_state: *ServerState, on_error: anytype, allocator: std.mem.Allocator) void {
             handleClient(socket, server_state, allocator) catch |err| {
-                if (err != ShadowsocksError.ClientDisconnected and err != ShadowsocksError.RemoteDisconnected) {
+                if (err != Error.ClientDisconnected and err != Error.RemoteDisconnected) {
                     closeSocketWithRst(socket);
                 } else {
                     socket.close();
