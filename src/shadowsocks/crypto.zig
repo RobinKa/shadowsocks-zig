@@ -19,9 +19,15 @@ pub fn deriveSessionSubkeyWithSalt(key: [32]u8, salt: [32]u8) [32]u8 {
     return session_subkey;
 }
 
-pub fn generateRandomSalt(salt: []u8, seed: [std.rand.DefaultCsprng.secret_seed_length]u8) void {
+pub fn generateRandomSalt() ![32]u8 {
+    var seed: [std.rand.DefaultCsprng.secret_seed_length]u8 = undefined;
+    try std.os.getrandom(&seed);
+
+    var salt: [32]u8 = undefined;
     var prng = std.rand.DefaultCsprng.init(seed);
-    prng.fill(salt);
+    prng.fill(&salt);
+
+    return salt;
 }
 
 pub const Encryptor = struct {
@@ -89,11 +95,9 @@ test "Encryptor decrypt" {
 }
 
 test "generateRandomSalt" {
-    var salt: [16]u8 = undefined;
-    const seed: [32]u8 = .{1} ** 32;
-    generateRandomSalt(&salt, seed);
-
-    try std.testing.expect(true);
+    var salt_a: [32]u8 = try generateRandomSalt();
+    var salt_b: [32]u8 = try generateRandomSalt();
+    try std.testing.expect(!std.mem.eql(u8, &salt_a, &salt_b));
 }
 
 test "Test decrypt real data" {

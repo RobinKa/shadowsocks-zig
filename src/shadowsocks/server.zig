@@ -317,13 +317,7 @@ fn closeSocketNoLinger(socket: network.Socket) void {
 }
 
 fn handleClient(socket: network.Socket, server_state: *ServerState, allocator: std.mem.Allocator) !void {
-    var response_salt: [32]u8 = undefined;
-
-    {
-        var seed: [32]u8 = undefined;
-        try std.os.getrandom(&seed);
-        Crypto.generateRandomSalt(&response_salt, seed);
-    }
+    var response_salt: [32]u8 = try Crypto.generateRandomSalt();
 
     var socket_set = try network.SocketSet.init(allocator);
 
