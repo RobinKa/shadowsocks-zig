@@ -74,10 +74,7 @@ pub const Client = struct {
         };
 
         var encoded_variable_header: [1024]u8 = undefined;
-        var stream = std.io.fixedBufferStream(&encoded_variable_header);
-        var writer = stream.writer();
-        try variable_header.encode(writer);
-        const encoded_variable_header_size = stream.pos;
+        const encoded_variable_header_size = try variable_header.encode(&encoded_variable_header);
 
         const fixed_header = headers.FixedLengthRequestHeader{
             .type = 0,
@@ -86,9 +83,7 @@ pub const Client = struct {
         };
 
         var encoded_fixed_header: [11]u8 = undefined;
-        stream = std.io.fixedBufferStream(&encoded_fixed_header);
-        writer = stream.writer();
-        try fixed_header.encode(writer);
+        _ = try fixed_header.encode(&encoded_fixed_header);
 
         var encrypted_fixed_header: [11]u8 = undefined;
         var encrypted_fixed_header_tag: [16]u8 = undefined;
@@ -148,14 +143,12 @@ pub const Client = struct {
         var encoded_response_header: [43]u8 = undefined;
         try self.response_decryptor.decrypt(&encoded_response_header, encrypted_response_header, encrypted_response_header_tag);
 
-        var stream = std.io.fixedBufferStream(&encoded_response_header);
-        var reader = stream.reader();
-        const response_header = try headers.FixedLengthResponseHeader.decode(reader);
+        const decoded = try headers.FixedLengthResponseHeader.decode(&encoded_response_header);
 
         // TODO: check response_header.request_salt == self.request_salt
         // TODO: check timestamp
 
-        self.next_length = response_header.length;
+        self.next_length = decoded.result.length;
         try self.recv_buffer.replaceRange(0, 32 + 43 + 16, &.{});
 
         self.state = .wait_payload;

@@ -1,22 +1,51 @@
 const std = @import("std");
 
+fn DecodeResult(comptime T: type) type {
+    return struct {
+        bytes_read: usize,
+        result: T,
+    };
+}
+
+fn DecodeResultWithDeinit(comptime T: type) type {
+    return struct {
+        bytes_read: usize,
+        result: T,
+
+        pub fn deinit(self: @This()) void {
+            self.result.deinit();
+        }
+    };
+}
+
 pub const FixedLengthRequestHeader = struct {
     type: u8,
     timestamp: u64,
     length: u16,
 
-    pub fn decode(reader: anytype) !@This() {
+    pub fn decode(encoded: []u8) !DecodeResult(@This()) {
+        var stream = std.io.fixedBufferStream(encoded);
+        var reader = stream.reader();
+
         return .{
-            .type = try reader.readIntBig(u8),
-            .timestamp = try reader.readIntBig(u64),
-            .length = try reader.readIntBig(u16),
+            .result = .{
+                .type = try reader.readIntBig(u8),
+                .timestamp = try reader.readIntBig(u64),
+                .length = try reader.readIntBig(u16),
+            },
+            .bytes_read = stream.pos,
         };
     }
 
-    pub fn encode(self: @This(), writer: anytype) !void {
+    pub fn encode(self: @This(), encoded: []u8) !usize {
+        var stream = std.io.fixedBufferStream(encoded);
+        var writer = stream.writer();
+
         try writer.writeIntBig(u8, self.type);
         try writer.writeIntBig(u64, self.timestamp);
         try writer.writeIntBig(u16, self.length);
+
+        return stream.pos;
     }
 };
 
@@ -38,7 +67,10 @@ pub const VariableLengthRequestHeader = struct {
         }
     }
 
-    pub fn decode(reader: anytype, length: u16, allocator: std.mem.Allocator) !@This() {
+    pub fn decode(encoded: []u8, length: u16, allocator: std.mem.Allocator) !DecodeResultWithDeinit(@This()) {
+        var stream = std.io.fixedBufferStream(encoded);
+        var reader = stream.reader();
+
         const start_pos = reader.context.pos;
 
         const address_type = try reader.readIntBig(u8);
@@ -78,17 +110,23 @@ pub const VariableLengthRequestHeader = struct {
         try reader.readNoEof(initial_payload[0..remaining_length]);
 
         return .{
-            .address_type = address_type,
-            .address = address,
-            .port = port,
-            .padding_length = padding_length,
-            .padding = padding,
-            .initial_payload = initial_payload,
-            .allocator = allocator,
+            .result = .{
+                .address_type = address_type,
+                .address = address,
+                .port = port,
+                .padding_length = padding_length,
+                .padding = padding,
+                .initial_payload = initial_payload,
+                .allocator = allocator,
+            },
+            .bytes_read = stream.pos,
         };
     }
 
-    pub fn encode(self: @This(), writer: anytype) !void {
+    pub fn encode(self: @This(), encoded: []u8) !usize {
+        var stream = std.io.fixedBufferStream(encoded);
+        var writer = stream.writer();
+
         try writer.writeIntBig(u8, self.address_type);
 
         if (self.address_type == 3) {
@@ -100,6 +138,8 @@ pub const VariableLengthRequestHeader = struct {
         try writer.writeIntBig(u16, self.padding_length);
         _ = try writer.write(self.padding);
         _ = try writer.write(self.initial_payload);
+
+        return stream.pos;
     }
 };
 
@@ -109,7 +149,10 @@ pub const FixedLengthResponseHeader = struct {
     salt: [32]u8,
     length: u16,
 
-    pub fn decode(reader: anytype) !@This() {
+    pub fn decode(encoded: []u8) !DecodeResult(@This()) {
+        var stream = std.io.fixedBufferStream(encoded);
+        var reader = stream.reader();
+
         const t = try reader.readIntBig(u8);
         const timestamp = try reader.readIntBig(u64);
         var salt: [32]u8 = undefined;
@@ -117,18 +160,26 @@ pub const FixedLengthResponseHeader = struct {
         const length = try reader.readIntBig(u16);
 
         return .{
-            .type = t,
-            .timestamp = timestamp,
-            .salt = salt,
-            .length = length,
+            .result = .{
+                .type = t,
+                .timestamp = timestamp,
+                .salt = salt,
+                .length = length,
+            },
+            .bytes_read = stream.pos,
         };
     }
 
-    pub fn encode(self: @This(), writer: anytype) !void {
+    pub fn encode(self: @This(), encoded: []u8) !usize {
+        var stream = std.io.fixedBufferStream(encoded);
+        var writer = stream.writer();
+
         try writer.writeIntBig(u8, self.type);
         try writer.writeIntBig(u64, self.timestamp);
         _ = try writer.write(&self.salt);
         try writer.writeIntBig(u16, self.length);
+
+        return stream.pos;
     }
 };
 
@@ -140,26 +191,21 @@ test "encode FixedLengthRequestHeader" {
     };
 
     var buffer: [100]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
-    var writer = stream.writer();
+    const bytes_written = try header.encode(&buffer);
 
-    try header.encode(writer);
-
-    try std.testing.expectEqual(@as(usize, 11), stream.pos);
+    try std.testing.expectEqual(@as(usize, 11), bytes_written);
     try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0, 0, 0, 0, 0, 123, 0, 33 }, buffer[0..11]);
 }
 
 test "decode FixedLengthRequestHeader" {
     var buffer = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 123, 0, 33, 7, 8, 9, 10 };
-    var stream = std.io.fixedBufferStream(&buffer);
-    var reader = stream.reader();
 
-    const header = try FixedLengthRequestHeader.decode(reader);
+    const decoded = try FixedLengthRequestHeader.decode(&buffer);
 
-    try std.testing.expectEqual(@as(usize, 11), reader.context.pos);
-    try std.testing.expectEqual(@as(u8, 0), header.type);
-    try std.testing.expectEqual(@as(u64, 123), header.timestamp);
-    try std.testing.expectEqual(@as(u16, 33), header.length);
+    try std.testing.expectEqual(@as(usize, 11), decoded.bytes_read);
+    try std.testing.expectEqual(@as(u8, 0), decoded.result.type);
+    try std.testing.expectEqual(@as(u64, 123), decoded.result.timestamp);
+    try std.testing.expectEqual(@as(u16, 33), decoded.result.length);
 }
 
 test "encode VariableLengthRequestHeader" {
@@ -178,48 +224,41 @@ test "encode VariableLengthRequestHeader" {
     defer header.deinit();
 
     var buffer: [100]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
-    var writer = stream.writer();
-
-    try header.encode(writer);
+    const bytes_written = try header.encode(&buffer);
 
     const correct = [_]u8{ 1, 1, 2, 3, 4, 0, 56, 0, 4, 0, 0, 0, 0, 5, 6, 7 };
-    try std.testing.expectEqual(correct.len, stream.pos);
+    try std.testing.expectEqual(correct.len, bytes_written);
     try std.testing.expectEqualSlices(u8, &correct, buffer[0..correct.len]);
 }
 
 test "decode VariableLengthRequestHeader" {
     var buffer = [_]u8{ 1, 1, 2, 3, 4, 0, 56, 0, 4, 0, 0, 0, 0, 5, 6, 7, 9, 9, 9 };
-    var stream = std.io.fixedBufferStream(&buffer);
-    var reader = stream.reader();
 
-    const header = try VariableLengthRequestHeader.decode(reader, buffer.len - 3, std.testing.allocator);
-    defer header.deinit();
+    const decoded = try VariableLengthRequestHeader.decode(&buffer, buffer.len - 3, std.testing.allocator);
+    defer decoded.deinit();
 
-    try std.testing.expectEqual(@as(usize, 16), reader.context.pos);
-    try std.testing.expectEqual(@as(u8, 1), header.address_type);
-    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4 }, header.address);
-    try std.testing.expectEqual(@as(u16, 56), header.port);
-    try std.testing.expectEqual(@as(u16, 4), header.padding_length);
-    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0 }, header.padding);
-    try std.testing.expectEqualSlices(u8, &.{ 5, 6, 7 }, header.initial_payload);
+    try std.testing.expectEqual(@as(usize, 16), decoded.bytes_read);
+    try std.testing.expectEqual(@as(u8, 1), decoded.result.address_type);
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4 }, decoded.result.address);
+    try std.testing.expectEqual(@as(u16, 56), decoded.result.port);
+    try std.testing.expectEqual(@as(u16, 4), decoded.result.padding_length);
+    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0 }, decoded.result.padding);
+    try std.testing.expectEqualSlices(u8, &.{ 5, 6, 7 }, decoded.result.initial_payload);
 }
 
 test "decode VariableLengthRequestHeader IPv6" {
     var buffer = [_]u8{ 4, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 0, 56, 0, 4, 0, 0, 0, 0, 5, 6, 7, 9, 9, 9 };
-    var stream = std.io.fixedBufferStream(&buffer);
-    var reader = stream.reader();
 
-    const header = try VariableLengthRequestHeader.decode(reader, buffer.len - 3, std.testing.allocator);
-    defer header.deinit();
+    const decoded = try VariableLengthRequestHeader.decode(&buffer, buffer.len - 3, std.testing.allocator);
+    defer decoded.deinit();
 
-    try std.testing.expectEqual(@as(usize, 28), reader.context.pos);
-    try std.testing.expectEqual(@as(u8, 4), header.address_type);
-    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }, header.address);
-    try std.testing.expectEqual(@as(u16, 56), header.port);
-    try std.testing.expectEqual(@as(u16, 4), header.padding_length);
-    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0 }, header.padding);
-    try std.testing.expectEqualSlices(u8, &.{ 5, 6, 7 }, header.initial_payload);
+    try std.testing.expectEqual(@as(usize, 28), decoded.bytes_read);
+    try std.testing.expectEqual(@as(u8, 4), decoded.result.address_type);
+    try std.testing.expectEqualSlices(u8, &.{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }, decoded.result.address);
+    try std.testing.expectEqual(@as(u16, 56), decoded.result.port);
+    try std.testing.expectEqual(@as(u16, 4), decoded.result.padding_length);
+    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0 }, decoded.result.padding);
+    try std.testing.expectEqualSlices(u8, &.{ 5, 6, 7 }, decoded.result.initial_payload);
 }
 
 test "encode FixedLengthResponseHeader" {
@@ -231,25 +270,20 @@ test "encode FixedLengthResponseHeader" {
     };
 
     var buffer: [100]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buffer);
-    var writer = stream.writer();
+    const bytes_written = try header.encode(&buffer);
 
-    try header.encode(writer);
-
-    try std.testing.expectEqual(@as(usize, 43), stream.pos);
+    try std.testing.expectEqual(@as(usize, 43), bytes_written);
     try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 0, 0, 0, 0, 0, 123, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 0, 33 }, buffer[0..43]);
 }
 
 test "decode FixedLengthResponseHeader" {
     var buffer = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0, 123, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 0, 33, 7, 8, 9, 10 };
-    var stream = std.io.fixedBufferStream(&buffer);
-    var reader = stream.reader();
 
-    const header = try FixedLengthResponseHeader.decode(reader);
+    const decoded = try FixedLengthResponseHeader.decode(&buffer);
 
-    try std.testing.expectEqual(@as(usize, 43), reader.context.pos);
-    try std.testing.expectEqual(@as(u8, 0), header.type);
-    try std.testing.expectEqual(@as(u64, 123), header.timestamp);
-    try std.testing.expectEqualSlices(u8, &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 }, &header.salt);
-    try std.testing.expectEqual(@as(u16, 33), header.length);
+    try std.testing.expectEqual(@as(usize, 43), decoded.bytes_read);
+    try std.testing.expectEqual(@as(u8, 0), decoded.result.type);
+    try std.testing.expectEqual(@as(u64, 123), decoded.result.timestamp);
+    try std.testing.expectEqualSlices(u8, &.{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 }, &decoded.result.salt);
+    try std.testing.expectEqual(@as(u16, 33), decoded.result.length);
 }

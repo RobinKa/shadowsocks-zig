@@ -104,9 +104,7 @@ fn handleWaitForFixed(state: *ClientState, server_state: *ServerState, allocator
     var decrypted: [11]u8 = undefined;
     try readContent(state.recv_buffer.items[32 .. 32 + 11 + 16], &decrypted, &state.request_decryptor);
 
-    var stream = std.io.fixedBufferStream(&decrypted);
-    var reader = stream.reader();
-    const decoded_header = try Headers.FixedLengthRequestHeader.decode(reader);
+    const decoded_header = (try Headers.FixedLengthRequestHeader.decode(&decrypted)).result;
 
     // Detect replay attacks by checking for old timestamps
     if (@intCast(u64, std.time.timestamp()) > decoded_header.timestamp + 30) {
@@ -131,9 +129,7 @@ fn handleWaitForVariable(state: *ClientState, allocator: std.mem.Allocator) !boo
 
     try readContent(state.recv_buffer.items[0 .. state.length + 16], decrypted, &state.request_decryptor);
 
-    var stream = std.io.fixedBufferStream(decrypted);
-    var reader = stream.reader();
-    const decoded_header = try Headers.VariableLengthRequestHeader.decode(reader, state.length, allocator);
+    const decoded_header = (try Headers.VariableLengthRequestHeader.decode(decrypted, state.length, allocator)).result;
 
     if (decoded_header.padding.len == 0 and decoded_header.initial_payload.len == 0) {
         return ShadowsocksError.NoInitialPayloadOrPadding;
@@ -269,9 +265,7 @@ fn handleResponse(state: *ClientState, received: []const u8, allocator: std.mem.
         };
 
         var encoded: [43]u8 = undefined;
-        var stream = std.io.fixedBufferStream(&encoded);
-        var writer = stream.writer();
-        try header.encode(writer);
+        _ = try header.encode(&encoded);
 
         var encrypted: [encoded.len]u8 = undefined;
         var tag: [16]u8 = undefined;

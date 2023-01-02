@@ -30,10 +30,7 @@ test "FixedLengthRequestHeader - derive, encode, encrypt, decrypt, decode" {
     };
 
     var encoded: [11]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&encoded);
-    var writer = stream.writer();
-
-    try header.encode(writer);
+    _ = try header.encode(&encoded);
 
     var encrypted: [encoded.len]u8 = undefined;
     var tag: [16]u8 = undefined;
@@ -42,12 +39,10 @@ test "FixedLengthRequestHeader - derive, encode, encrypt, decrypt, decode" {
     var decrypted: [encrypted.len]u8 = undefined;
     try decode_encryptor.decrypt(&decrypted, &encrypted, tag);
 
-    stream = std.io.fixedBufferStream(&decrypted);
-    var reader = stream.reader();
+    const decoded = try Headers.FixedLengthRequestHeader.decode(&decrypted);
 
-    const decoded_header = try Headers.FixedLengthRequestHeader.decode(reader);
-
-    try std.testing.expectEqual(header.length, decoded_header.length);
-    try std.testing.expectEqual(header.timestamp, decoded_header.timestamp);
-    try std.testing.expectEqual(header.type, decoded_header.type);
+    try std.testing.expectEqual(@as(usize, 11), decoded.bytes_read);
+    try std.testing.expectEqual(header.length, decoded.result.length);
+    try std.testing.expectEqual(header.timestamp, decoded.result.timestamp);
+    try std.testing.expectEqual(header.type, decoded.result.type);
 }
