@@ -317,14 +317,14 @@ fn forwardToClient(state: *ClientState, received: []const u8, allocator: std.mem
     }
 }
 
-fn closeSocketNoLinger(socket: network.Socket) void {
+fn closeSocketWithRst(socket: network.Socket) void {
     const Linger = extern struct {
         l_onoff: u16,
         l_linger: u16,
     };
 
     const value: Linger = .{
-        .l_onoff = 0,
+        .l_onoff = 1,
         .l_linger = 0,
     };
 
@@ -397,7 +397,12 @@ fn handleClient(socket: network.Socket, server_state: *ServerState, allocator: s
 
 fn handleClientCatchAll(socket: network.Socket, server_state: *ServerState, on_error: anytype, allocator: std.mem.Allocator) void {
     handleClient(socket, server_state, allocator) catch |err| {
-        closeSocketNoLinger(socket);
+        if (err != ShadowsocksError.ClientDisconnected and err != ShadowsocksError.RemoteDisconnected) {
+            closeSocketWithRst(socket);
+        } else {
+            socket.close();
+        }
+
         on_error(err);
     };
 }
