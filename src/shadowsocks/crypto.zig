@@ -8,6 +8,17 @@ pub fn deriveSessionSubkey(key: []const u8, session_subkey: []u8) void {
     blake.final(session_subkey);
 }
 
+pub fn deriveSessionSubkeyWithSalt(key: [32]u8, salt: [32]u8) [32]u8 {
+    var key_and_salt: [key.len + salt.len]u8 = undefined;
+    std.mem.copy(u8, key_and_salt[0..key.len], &key);
+    std.mem.copy(u8, key_and_salt[key.len .. key.len + salt.len], &salt);
+
+    var session_subkey: [32]u8 = undefined;
+    deriveSessionSubkey(&key_and_salt, &session_subkey);
+
+    return session_subkey;
+}
+
 pub fn generateRandomSalt(salt: []u8, seed: [std.rand.DefaultCsprng.secret_seed_length]u8) void {
     var prng = std.rand.DefaultCsprng.init(seed);
     prng.fill(salt);

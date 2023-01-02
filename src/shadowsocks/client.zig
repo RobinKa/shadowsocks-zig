@@ -40,18 +40,9 @@ pub const Client = struct {
 
         var request_salt: [32]u8 = undefined;
         prng.fill(&request_salt);
-        var request_session_subkey: [32]u8 = undefined;
-
-        {
-            var key_and_request_salt = std.ArrayList(u8).init(allocator);
-            defer key_and_request_salt.deinit();
-            try key_and_request_salt.appendSlice(&key);
-            try key_and_request_salt.appendSlice(&request_salt);
-            crypto.deriveSessionSubkey(key_and_request_salt.items, &request_session_subkey);
-        }
 
         var request_encryptor = crypto.Encryptor{
-            .key = request_session_subkey,
+            .key = crypto.deriveSessionSubkeyWithSalt(key, request_salt),
         };
 
         const padding_length = if (initial_payload.len == 0) std.rand.Random.intRangeLessThan(prng.random(), u16, 1, 901) else 0;
@@ -123,26 +114,16 @@ pub const Client = struct {
         };
     }
 
-    fn waitHeader(self: *@This(), allocator: std.mem.Allocator) !bool {
+    fn waitHeader(self: *@This()) !bool {
         if (self.recv_buffer.items.len < 32 + 43 + 16) {
             return false;
         }
 
         std.mem.copy(u8, &self.response_salt, self.recv_buffer.items[0..32]);
 
-        {
-            var key_and_response_salt = std.ArrayList(u8).init(allocator);
-            defer key_and_response_salt.deinit();
-            try key_and_response_salt.appendSlice(&self.key);
-            try key_and_response_salt.appendSlice(&self.response_salt);
-
-            var response_session_subkey: [32]u8 = undefined;
-            crypto.deriveSessionSubkey(key_and_response_salt.items, &response_session_subkey);
-
-            self.response_decryptor = .{
-                .key = response_session_subkey,
-            };
-        }
+        self.response_decryptor = .{
+            .key = crypto.deriveSessionSubkeyWithSalt(self.key, self.response_salt),
+        };
 
         const encrypted_response_header = self.recv_buffer.items[32 .. 32 + 43];
         var encrypted_response_header_tag: [16]u8 = undefined;
@@ -214,7 +195,7 @@ pub const Client = struct {
 
             switch (self.state) {
                 .wait_header => {
-                    if (!try self.waitHeader(allocator)) {
+                    if (!try self.waitHeader()) {
                         return 0;
                     }
                 },

@@ -28,7 +28,7 @@ const ClientState = struct {
 
     request_salt: [32]u8 = undefined,
     response_salt: [32]u8 = undefined,
-    key: []const u8,
+    key: [32]u8,
 
     sent_initial_response: bool = false,
     response_encryptor: Crypto.Encryptor,
@@ -44,10 +44,10 @@ const ClientState = struct {
 };
 
 const ServerState = struct {
-    key: []const u8,
+    key: [32]u8,
     request_salt_cache: Salts.SaltCache,
 
-    fn init(key: []const u8, allocator: std.mem.Allocator) @This() {
+    fn init(key: [32]u8, allocator: std.mem.Allocator) @This() {
         return .{
             .key = key,
             .request_salt_cache = Salts.SaltCache.init(allocator),
@@ -71,13 +71,11 @@ const ShadowsocksError = error{
     TimestampTooOld,
 };
 
-fn handleWaitForFixed(state: *ClientState, server_state: *ServerState, allocator: std.mem.Allocator) !bool {
+fn handleWaitForFixed(state: *ClientState, server_state: *ServerState) !bool {
     // Initial request needs to have at least the fixed length header
     if (state.recv_buffer.items.len < 32 + 11 + 16) {
         return ShadowsocksError.InitialRequestTooSmall;
     }
-
-    var session_subkey: [32]u8 = undefined;
 
     std.mem.copy(u8, &state.request_salt, state.recv_buffer.items[0..32]);
 
@@ -89,16 +87,8 @@ fn handleWaitForFixed(state: *ClientState, server_state: *ServerState, allocator
         return ShadowsocksError.DuplicateSalt;
     }
 
-    {
-        var key_and_request_salt = std.ArrayList(u8).init(allocator);
-        defer key_and_request_salt.deinit();
-        try key_and_request_salt.appendSlice(state.key);
-        try key_and_request_salt.appendSlice(&state.request_salt);
-        Crypto.deriveSessionSubkey(key_and_request_salt.items, &session_subkey);
-    }
-
     state.request_decryptor = .{
-        .key = session_subkey,
+        .key = Crypto.deriveSessionSubkeyWithSalt(state.key, state.request_salt),
     };
 
     var decrypted: [11]u8 = undefined;
@@ -335,16 +325,6 @@ fn handleClient(socket: network.Socket, server_state: *ServerState, allocator: s
         Crypto.generateRandomSalt(&response_salt, seed);
     }
 
-    var response_session_subkey: [32]u8 = undefined;
-
-    {
-        var key_and_response_salt = std.ArrayList(u8).init(allocator);
-        defer key_and_response_salt.deinit();
-        try key_and_response_salt.appendSlice(server_state.key);
-        try key_and_response_salt.appendSlice(&response_salt);
-        Crypto.deriveSessionSubkey(key_and_response_salt.items, &response_session_subkey);
-    }
-
     var socket_set = try network.SocketSet.init(allocator);
 
     // TODO: if any of the trys fail, things aren't cleaned up properly.
@@ -352,10 +332,10 @@ fn handleClient(socket: network.Socket, server_state: *ServerState, allocator: s
         .socket = socket,
         .remote_socket = try network.Socket.create(.ipv4, .tcp),
         .socket_set = &socket_set,
-        .key = server_state.key[0..32],
+        .key = server_state.key,
         .response_salt = response_salt,
         .response_encryptor = .{
-            .key = response_session_subkey,
+            .key = Crypto.deriveSessionSubkeyWithSalt(server_state.key, response_salt),
         },
         .recv_buffer = try std.ArrayList(u8).initCapacity(allocator, 1024),
     };
@@ -395,7 +375,7 @@ fn handleClient(socket: network.Socket, server_state: *ServerState, allocator: s
         while (true) {
             switch (state.status) {
                 .wait_for_fixed => {
-                    if (!try handleWaitForFixed(&state, server_state, allocator)) break;
+                    if (!try handleWaitForFixed(&state, server_state)) break;
                 },
                 .wait_for_variable => {
                     if (!try handleWaitForVariable(&state, allocator)) break;
@@ -422,7 +402,7 @@ fn onClientError(err: anytype) void {
     std.debug.print("client terminated: {s}\n", .{@errorName(err)});
 }
 
-pub fn start(port: u16, key: []const u8, allocator: std.mem.Allocator) !void {
+pub fn start(port: u16, key: [32]u8, allocator: std.mem.Allocator) !void {
     var socket = try network.Socket.create(.ipv4, .tcp);
     defer socket.close();
     try socket.bindToPort(port);
