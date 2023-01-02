@@ -5,6 +5,10 @@ const config = @import("config.zig");
 
 const logger = std.log.scoped(.main);
 
+test {
+    _ = @import("shadowsocks.zig");
+}
+
 fn getConfig(allocator: std.mem.Allocator) !config.Config {
     var arg_it = try std.process.argsWithAllocator(allocator);
     defer arg_it.deinit();
