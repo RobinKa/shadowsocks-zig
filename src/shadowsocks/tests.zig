@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const network = @import("network");
 const shadowsocks_client = @import("client.zig");
 const shadowsocks_server = @import("server.zig");
@@ -226,7 +225,5 @@ test "MITM replay fails" {
     const replay_received = socket.receive(&recv_buffer);
 
     // TODO: Windows
-    if (builtin.os.tag != .windows) {
-        try std.testing.expectError(network.Socket.ReceiveError.ConnectionResetByPeer, replay_received);
-    }
+    try std.testing.expectError(network.Socket.ReceiveError.ConnectionResetByPeer, replay_received);
 }
