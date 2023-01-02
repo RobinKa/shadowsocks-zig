@@ -2,11 +2,27 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug exe",
+            "name": "Debug server - config.json",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/zig-out/bin/main.exe",
             "args": ["../../configs/config.json"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/zig-out/bin",
+            "symbolSearchPath": "${workspaceFolder}/zig-out/bin",
+            "environment": [],
+            "externalConsole": false,
+            "logging": {
+                "moduleLoad": false
+            },
+            "preLaunchTask": "Build zig"
+        },
+        {
+            "name": "Debug server - config-blake3-aes128gcm.json",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/zig-out/bin/main.exe",
+            "args": ["../../configs/config-blake3-aes128gcm.json"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/zig-out/bin",
             "symbolSearchPath": "${workspaceFolder}/zig-out/bin",

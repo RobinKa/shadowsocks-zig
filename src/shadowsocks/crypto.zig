@@ -8,20 +8,21 @@ const ChaCha8Poly1305 = std.crypto.aead.chacha_poly.ChaCha8Poly1305;
 const ChaCha12Poly1305 = std.crypto.aead.chacha_poly.ChaCha12Poly1305;
 const ChaCha20Poly1305 = std.crypto.aead.chacha_poly.ChaCha20Poly1305;
 
-pub fn deriveSessionSubkey(key: []const u8, session_subkey: []u8) void {
+fn deriveSessionSubkey(key: []const u8, session_subkey: []u8) void {
     var blake = Blake3.initKdf("shadowsocks 2022 session subkey", .{});
     blake.update(key);
     blake.final(session_subkey);
 }
 
-fn Crypto(comptime TAlg: type, comptime salt_size: usize) type {
+fn Crypto(comptime method_name: []const u8, comptime TAlg: type) type {
     // We use u96 for the nonce, so make sure nonce_length is 12 (96/8).
     std.debug.assert(TAlg.nonce_length == 12);
 
     return struct {
-        pub const salt_length = salt_size;
+        pub const name = method_name;
         pub const tag_length = TAlg.tag_length;
         pub const key_length = TAlg.key_length;
+        pub const salt_length = key_length;
         pub const nonce_length = TAlg.nonce_length;
 
         pub fn deriveSessionSubkeyWithSalt(key: [key_length]u8, salt: [salt_length]u8) [key_length]u8 {
@@ -71,11 +72,11 @@ fn Crypto(comptime TAlg: type, comptime salt_size: usize) type {
     };
 }
 
-pub const Blake3Aes128Gcm = Crypto(Aes128Gcm, 16);
-pub const Blake3Aes256Gcm = Crypto(Aes256Gcm, 32);
-pub const Blake3ChaCha8Poly1305 = Crypto(ChaCha8Poly1305, 32);
-pub const Blake3ChaCha12Poly1305 = Crypto(ChaCha12Poly1305, 32);
-pub const Blake3ChaCha20Poly1305 = Crypto(ChaCha20Poly1305, 32);
+pub const Blake3Aes128Gcm = Crypto("Blake3Aes128Gcm", Aes128Gcm);
+pub const Blake3Aes256Gcm = Crypto("Blake3Aes256Gcm", Aes256Gcm);
+pub const Blake3ChaCha8Poly1305 = Crypto("Blake3ChaCha8Poly1305", ChaCha8Poly1305);
+pub const Blake3ChaCha12Poly1305 = Crypto("Blake3ChaCha12Poly1305", ChaCha12Poly1305);
+pub const Blake3ChaCha20Poly1305 = Crypto("Blake3ChaCha20Poly1305", ChaCha20Poly1305);
 
 pub const Methods = [_]type{
     Blake3Aes128Gcm,

@@ -14,18 +14,33 @@ fn getConfig(allocator: std.mem.Allocator) !config.Config {
     if (config_path != null) {
         return try config.configFromJsonFile(config_path.?, allocator);
     } else {
-        var cfg: config.Config = undefined;
-
         const env_port: []u8 = try std.process.getEnvVarOwned(allocator, "SHADOWSOCKS_PORT");
         defer allocator.free(env_port);
 
         const env_key: []u8 = try std.process.getEnvVarOwned(allocator, "SHADOWSOCKS_KEY");
+        defer allocator.free(env_key);
 
-        cfg.port = try std.fmt.parseUnsigned(u16, env_port, 10);
-        cfg.key = env_key;
+        const env_method: []u8 = try std.process.getEnvVarOwned(allocator, "SHADOWSOCKS_METHOD");
+        defer allocator.free(env_method);
 
-        return cfg;
+        return .{
+            .port = try std.fmt.parseUnsigned(u16, env_port, 10),
+            .key = env_key,
+            .method = env_method,
+        };
     }
+}
+
+fn startServerFromConfig(cfg: config.Config, allocator: std.mem.Allocator) !void {
+    inline for (shadowsocks.crypto.Methods) |TCrypto| {
+        if (std.mem.eql(u8, cfg.method, TCrypto.name)) {
+            var key: [TCrypto.key_length]u8 = undefined;
+            try std.base64.standard.Decoder.decode(&key, cfg.key);
+            try shadowsocks.server.Server(TCrypto).start(cfg.port, key, allocator);
+        }
+    }
+
+    unreachable;
 }
 
 pub fn main() !void {
@@ -38,12 +53,9 @@ pub fn main() !void {
 
     const cfg: config.Config = try getConfig(allocator);
 
-    std.debug.print("Starting with port {d}\n", .{cfg.port});
+    std.debug.print("Starting with port {d} and encryption method {s}\n", .{ cfg.port, cfg.method });
 
-    var key: [32]u8 = undefined;
-    try std.base64.standard.Decoder.decode(&key, cfg.key);
-
-    shadowsocks.server.Server(shadowsocks.crypto.Blake3Aes256Gcm).start(cfg.port, key, allocator) catch |err| {
+    startServerFromConfig(cfg, allocator) catch |err| {
         std.debug.print("Server failed, error: {s}\n", .{@errorName(err)});
     };
 }

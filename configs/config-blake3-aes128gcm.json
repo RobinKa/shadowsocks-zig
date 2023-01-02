@@ -1,0 +1,5 @@
+{
+  "port": 5667,
+  "key": "0hYao6RoEoW3CTYLlhq2vw==",
+  "method": "Blake3Aes128Gcm"
+}

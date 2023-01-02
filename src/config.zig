@@ -3,6 +3,7 @@ const std = @import("std");
 pub const Config = struct {
     port: u16,
     key: []u8,
+    method: []u8,
 };
 
 pub fn configFromJsonString(input_data: []const u8, allocator: std.mem.Allocator) !Config {
