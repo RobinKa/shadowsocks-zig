@@ -19,6 +19,8 @@ fn Crypto(comptime method_name: []const u8, comptime TAlg: type) type {
     std.debug.assert(TAlg.nonce_length == 12);
 
     return struct {
+        pub const algorithm = TAlg;
+
         pub const name = method_name;
         pub const tag_length = TAlg.tag_length;
         pub const key_length = TAlg.key_length;
@@ -26,6 +28,17 @@ fn Crypto(comptime method_name: []const u8, comptime TAlg: type) type {
         pub const nonce_length = TAlg.nonce_length;
 
         pub fn deriveSessionSubkeyWithSalt(key: [key_length]u8, salt: [salt_length]u8) [key_length]u8 {
+            var key_and_salt: [key.len + salt.len]u8 = undefined;
+            std.mem.copy(u8, key_and_salt[0..key.len], &key);
+            std.mem.copy(u8, key_and_salt[key.len .. key.len + salt.len], &salt);
+
+            var session_subkey: [key_length]u8 = undefined;
+            deriveSessionSubkey(&key_and_salt, &session_subkey);
+
+            return session_subkey;
+        }
+
+        pub fn deriveSessionSubkeyWithSaltUdp(key: [key_length]u8, salt: [8]u8) [key_length]u8 {
             var key_and_salt: [key.len + salt.len]u8 = undefined;
             std.mem.copy(u8, key_and_salt[0..key.len], &key);
             std.mem.copy(u8, key_and_salt[key.len .. key.len + salt.len], &salt);
@@ -69,6 +82,41 @@ fn Crypto(comptime method_name: []const u8, comptime TAlg: type) type {
                 self.nonce += 1;
             }
         };
+
+        const TBlockAlg = switch (key_length) {
+            16 => std.crypto.core.aes.Aes128,
+            32 => std.crypto.core.aes.Aes256,
+            else => unreachable,
+        };
+        const block_size: usize = 16;
+
+        pub const BlockEncryptor = struct {
+            block_alg: std.crypto.core.aes.AesEncryptCtx(TBlockAlg),
+
+            pub fn init(key: [key_length]u8) @This() {
+                return .{
+                    .block_alg = TBlockAlg.initEnc(key),
+                };
+            }
+
+            pub fn encrypt(self: @This(), message: *const [block_size]u8, encrypted: *[block_size]u8) void {
+                self.block_alg.encrypt(encrypted, message);
+            }
+        };
+
+        pub const BlockDecryptor = struct {
+            block_alg: std.crypto.core.aes.AesDecryptCtx(TBlockAlg),
+
+            pub fn init(key: [key_length]u8) @This() {
+                return .{
+                    .block_alg = TBlockAlg.initDec(key),
+                };
+            }
+
+            pub fn decrypt(self: @This(), message: *[block_size]u8, encrypted: *const [block_size]u8) void {
+                self.block_alg.decrypt(message, encrypted);
+            }
+        };
     };
 }
 
@@ -87,6 +135,8 @@ pub const Methods = [_]type{
 };
 
 pub const Encryptor = Blake3Aes256Gcm.Encryptor;
+pub const BlockEncryptor = Blake3Aes256Gcm.BlockEncryptor;
+pub const BlockDecryptor = Blake3Aes256Gcm.BlockDecryptor;
 pub const generateRandomSalt = Blake3Aes256Gcm.generateRandomSalt;
 pub const deriveSessionSubkeyWithSalt = Blake3Aes256Gcm.deriveSessionSubkeyWithSalt;
 
@@ -163,4 +213,19 @@ test "Test decrypt real data" {
 
     var message: [11]u8 = undefined;
     try Aes256Gcm.decrypt(&message, fixed, tag.*, "", nonce, session_subkey);
+}
+
+test "Block encrypt decrypt" {
+    const key = [_]u8{1} ** 32;
+    const message: []const u8 = "abcdefghijklmnop";
+
+    const encryptor = BlockEncryptor.init(key);
+    var encrypted_message: [16]u8 = undefined;
+    encryptor.encrypt(message[0..16], &encrypted_message);
+
+    const decryptor = BlockDecryptor.init(key);
+    var restored_message: [16]u8 = undefined;
+    decryptor.decrypt(&restored_message, &encrypted_message);
+
+    try std.testing.expectEqualStrings(message, &restored_message);
 }
