@@ -42,7 +42,7 @@ fn startServerFromConfig(cfg: config.Config, allocator: std.mem.Allocator) !void
         if (std.mem.eql(u8, cfg.method, TCrypto.name)) {
             var key: [TCrypto.key_length]u8 = undefined;
             try std.base64.standard.Decoder.decode(&key, cfg.key);
-            try shadowsocks.server.Server(TCrypto).start_blocking(cfg.port, key, allocator);
+            try shadowsocks.server.Server(TCrypto).startBlocking(cfg.port, key, allocator);
         }
     }
 

@@ -8,6 +8,10 @@ const logger = std.log.scoped(.shadowsocks_server);
 
 pub fn Server(comptime TCrypto: type) type {
     return struct {
+        should_stop: *bool,
+        thread: std.Thread,
+        allocator: std.mem.Allocator,
+
         const Error = error{
             InitialRequestTooSmall,
             UnknownAddressType,
@@ -423,7 +427,7 @@ pub fn Server(comptime TCrypto: type) type {
             logger.info("client terminated: {s}", .{@errorName(err)});
         }
 
-        fn start_internal(should_stop: *bool, port: u16, key: [TCrypto.key_length]u8, allocator: std.mem.Allocator) !void {
+        fn startInternal(should_stop: *bool, port: u16, key: [TCrypto.key_length]u8, allocator: std.mem.Allocator) !void {
             var socket = try network.Socket.create(.ipv4, .tcp);
             defer socket.close();
             try socket.bindToPort(port);
@@ -462,13 +466,9 @@ pub fn Server(comptime TCrypto: type) type {
             }
         }
 
-        should_stop: *bool,
-        thread: std.Thread,
-        allocator: std.mem.Allocator,
-
         pub fn start(port: u16, key: [TCrypto.key_length]u8, allocator: std.mem.Allocator) !@This() {
             var should_stop = try allocator.create(bool);
-            var thread = try std.Thread.spawn(.{}, start_internal, .{ should_stop, port, key, allocator });
+            var thread = try std.Thread.spawn(.{}, startInternal, .{ should_stop, port, key, allocator });
 
             return .{
                 .thread = thread,
@@ -477,9 +477,9 @@ pub fn Server(comptime TCrypto: type) type {
             };
         }
 
-        pub fn start_blocking(port: u16, key: [TCrypto.key_length]u8, allocator: std.mem.Allocator) !void {
+        pub fn startBlocking(port: u16, key: [TCrypto.key_length]u8, allocator: std.mem.Allocator) !void {
             var should_stop = false;
-            try start_internal(&should_stop, port, key, allocator);
+            try startInternal(&should_stop, port, key, allocator);
         }
 
         pub fn stop(self: *@This()) void {
