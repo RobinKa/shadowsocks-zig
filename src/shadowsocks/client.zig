@@ -3,7 +3,7 @@ const network = @import("network");
 const headers = @import("headers.zig");
 const crypto = @import("crypto.zig");
 
-const logger = std.log.scoped(.shadowsocks_client);
+const logger = std.log.scoped(.@"shadowsocks.client");
 
 pub fn Client(comptime TCrypto: type) type {
     const State = enum {

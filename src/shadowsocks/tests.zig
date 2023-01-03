@@ -4,7 +4,7 @@ const shadowsocks_client = @import("client.zig");
 const shadowsocks_server = @import("server.zig");
 const crypto = @import("crypto.zig");
 
-const logger = std.log.scoped(.shadowsocks_test);
+const logger = std.log.scoped(.@"shadowsocks.tests");
 
 const MitmData = struct {
     sent: std.ArrayList(u8),

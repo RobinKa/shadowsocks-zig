@@ -4,7 +4,7 @@ const crypto = @import("crypto.zig");
 const headers = @import("headers.zig");
 const salts = @import("salts.zig");
 
-const logger = std.log.scoped(.shadowsocks_server);
+const logger = std.log.scoped(.@"shadowsocks.server");
 
 pub fn Server(comptime TCrypto: type) type {
     return struct {
