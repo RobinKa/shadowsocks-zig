@@ -37,12 +37,17 @@ fn getConfig(allocator: std.mem.Allocator) !config.Config {
     }
 }
 
-fn startServerFromConfig(cfg: config.Config, allocator: std.mem.Allocator) !void {
+fn startServerFromConfig(cfg: config.Config, allocator: std.mem.Allocator) !noreturn {
     inline for (shadowsocks.crypto.Methods) |TCrypto| {
         if (std.mem.eql(u8, cfg.method, TCrypto.name)) {
             var key: [TCrypto.key_length]u8 = undefined;
             try std.base64.standard.Decoder.decode(&key, cfg.key);
-            try shadowsocks.server.Server(TCrypto).startBlocking(cfg.port, key, allocator);
+
+            var server = try shadowsocks.async_server.Server(TCrypto).init(key, allocator);
+            try server.start(try std.net.Address.parseIp("0.0.0.0", cfg.port));
+            while (true) {
+                try server.tick();
+            }
         }
     }
 

@@ -1,6 +1,7 @@
 pub const crypto = @import("shadowsocks/crypto.zig");
 pub const headers = @import("shadowsocks/headers.zig");
 pub const server = @import("shadowsocks/server.zig");
+pub const async_server = @import("shadowsocks/async_server.zig");
 pub const client = @import("shadowsocks/client.zig");
 
 const std = @import("std");
@@ -9,6 +10,8 @@ const network = @import("network");
 test {
     _ = @import("shadowsocks/tests.zig");
     _ = @import("shadowsocks/salts.zig");
+    _ = @import("shadowsocks/test_io.zig");
+    _ = @import("shadowsocks/async_server.zig");
 }
 
 test "FixedLengthRequestHeader - derive, encode, encrypt, decrypt, decode" {
