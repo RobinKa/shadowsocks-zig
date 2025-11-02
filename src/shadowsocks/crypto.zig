@@ -27,8 +27,8 @@ fn Crypto(comptime method_name: []const u8, comptime TAlg: type) type {
 
         pub fn deriveSessionSubkeyWithSalt(key: [key_length]u8, salt: [salt_length]u8) [key_length]u8 {
             var key_and_salt: [key.len + salt.len]u8 = undefined;
-            std.mem.copy(u8, key_and_salt[0..key.len], &key);
-            std.mem.copy(u8, key_and_salt[key.len .. key.len + salt.len], &salt);
+            @memcpy(key_and_salt[0..key.len], &key);
+            @memcpy(key_and_salt[key.len .. key.len + salt.len], &salt);
 
             var session_subkey: [key_length]u8 = undefined;
             deriveSessionSubkey(&key_and_salt, &session_subkey);
@@ -37,13 +37,8 @@ fn Crypto(comptime method_name: []const u8, comptime TAlg: type) type {
         }
 
         pub fn generateRandomSalt() ![salt_length]u8 {
-            var seed: [std.rand.DefaultCsprng.secret_seed_length]u8 = undefined;
-            try std.os.getrandom(&seed);
-
             var salt: [salt_length]u8 = undefined;
-            var prng = std.rand.DefaultCsprng.init(seed);
-            prng.fill(&salt);
-
+            try std.posix.getrandom(&salt);
             return salt;
         }
 
@@ -53,7 +48,13 @@ fn Crypto(comptime method_name: []const u8, comptime TAlg: type) type {
 
             pub fn encrypt(self: *@This(), message: []const u8, encrypted: []u8, tag: *[tag_length]u8) void {
                 var nonce: [nonce_length]u8 = undefined;
-                std.mem.writeIntLittle(u96, &nonce, self.nonce);
+                // write self.nonce (u96) little-endian into nonce[0..12]
+                var tmp = self.nonce;
+                var i: usize = 0;
+                while (i < nonce.len) : (i += 1) {
+                    nonce[i] = @truncate(tmp);
+                    tmp = tmp >> 8;
+                }
 
                 TAlg.encrypt(encrypted, tag, message, "", nonce, self.key);
 
@@ -62,7 +63,13 @@ fn Crypto(comptime method_name: []const u8, comptime TAlg: type) type {
 
             pub fn decrypt(self: *@This(), message: []u8, encrypted: []const u8, tag: [tag_length]u8) !void {
                 var nonce: [nonce_length]u8 = undefined;
-                std.mem.writeIntLittle(u96, &nonce, self.nonce);
+                // write self.nonce (u96) little-endian into nonce[0..12]
+                var tmp2 = self.nonce;
+                var j: usize = 0;
+                while (j < nonce.len) : (j += 1) {
+                    nonce[j] = @truncate(tmp2);
+                    tmp2 = tmp2 >> 8;
+                }
 
                 try TAlg.decrypt(message, encrypted, tag, "", nonce, self.key);
 
@@ -148,10 +155,10 @@ test "Test decrypt real data" {
 
     const salt = data[0..32];
 
-    var input = std.ArrayList(u8).init(std.testing.allocator);
+    var input = try std.ArrayList(u8).initCapacity(std.testing.allocator, key.len + salt.len);
     defer input.deinit();
-    try input.appendSlice(&key);
-    try input.appendSlice(salt);
+    try input.appendSlice(std.testing.allocator, &key);
+    try input.appendSlice(std.testing.allocator, salt);
     var session_subkey: [32]u8 = undefined;
     deriveSessionSubkey(input.items, &session_subkey);
 
@@ -159,7 +166,11 @@ test "Test decrypt real data" {
     const tag = data[32 + 11 .. 32 + 11 + 16];
 
     var nonce: [96 / 8]u8 = undefined;
-    std.mem.writeIntBig(u96, &nonce, 0);
+    // write zero nonce big-endian
+    var ni: usize = 0;
+    while (ni < nonce.len) : (ni += 1) {
+        nonce[ni] = 0;
+    }
 
     var message: [11]u8 = undefined;
     try Aes256Gcm.decrypt(&message, fixed, tag.*, "", nonce, session_subkey);

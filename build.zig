@@ -1,43 +1,54 @@
 const std = @import("std");
 
-pub fn build(b: *std.build.Builder) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
+pub fn build(b: *std.Build) void {
+    // Standard options for target and optimization according to Zig 0.16 API.
     const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
 
-    // Standard release options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
-    const mode = b.standardReleaseOptions();
+    // Create a module for the main executable so we can attach package paths.
+    const main_mod = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    // Expose the in-repo network package to the module.
+    main_mod.addAnonymousImport("network", .{ .root_source_file = b.path("libs/zig-network/network.zig") });
 
-    const exe = b.addExecutable("main", "src/main.zig");
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
-    exe.addPackagePath("network", "libs/zig-network/network.zig");
-    exe.install();
+    const exe = b.addExecutable(.{
+        .name = "main",
+        .root_module = main_mod,
+    });
 
-    const run_cmd = exe.run();
-    run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    b.installArtifact(exe);
 
+    // Convenience run step for the main executable.
+    const run_exe = b.addRunArtifact(exe);
+    // If the build was invoked with extra args, forward them to the run step.
+    if (b.args) |args| run_exe.addArgs(args);
     const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
+    run_step.dependOn(&run_exe.step);
 
-    const exe_tests = b.addTest("src/main.zig");
-    exe_tests.setTarget(target);
-    exe_tests.setBuildMode(mode);
-    exe_tests.addPackagePath("network", "libs/zig-network/network.zig");
+    // Unit tests for src/main.zig
+    const main_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    main_test_mod.addAnonymousImport("network", .{ .root_source_file = b.path("libs/zig-network/network.zig") });
+    const main_tests = b.addTest(.{ .root_module = main_test_mod });
+    const run_main_tests = b.addRunArtifact(main_tests);
 
-    const shadowsocks_tests = b.addTestExe("shadowsocks-test", "src/shadowsocks.zig");
-    shadowsocks_tests.setTarget(target);
-    shadowsocks_tests.setBuildMode(mode);
-    shadowsocks_tests.addPackagePath("network", "libs/zig-network/network.zig");
-    shadowsocks_tests.install();
+    // Unit tests for src/shadowsocks.zig (named test executable)
+    const ss_mod = b.createModule(.{
+        .root_source_file = b.path("src/shadowsocks.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    ss_mod.addAnonymousImport("network", .{ .root_source_file = b.path("libs/zig-network/network.zig") });
+    const ss_tests = b.addTest(.{ .name = "shadowsocks-test", .root_module = ss_mod });
+    const run_ss_tests = b.addRunArtifact(ss_tests);
 
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&exe_tests.step);
-    test_step.dependOn(&shadowsocks_tests.step);
+    test_step.dependOn(&run_main_tests.step);
+    test_step.dependOn(&run_ss_tests.step);
 }

@@ -34,7 +34,7 @@ pub const SaltCache = struct {
 
     pub fn deinit(self: *@This()) void {
         while (self.salt_queue.count() > 0) {
-            var salt = self.salt_queue.remove();
+            const salt = self.salt_queue.remove();
             self.allocator.free(salt.salt);
         }
 
@@ -43,13 +43,13 @@ pub const SaltCache = struct {
     }
 
     pub fn maybeAdd(self: *@This(), salt: []const u8, timestamp: u64) !bool {
-        var salt_copy = try self.allocator.dupe(u8, salt);
+        const salt_copy = try self.allocator.dupe(u8, salt);
         errdefer self.allocator.free(salt_copy);
 
         self.salt_mutex.lock();
         defer self.salt_mutex.unlock();
 
-        var kv = try self.salt_set.getOrPut(salt_copy);
+        const kv = try self.salt_set.getOrPut(salt_copy);
 
         if (kv.found_existing) {
             self.allocator.free(salt_copy);
@@ -91,17 +91,17 @@ test "salt cache" {
     var not_duplicate = try cache.maybeAdd(&salt_a, 100);
 
     try std.testing.expectEqual(true, not_duplicate);
-    try std.testing.expectEqual(@as(usize, 1), cache.salt_queue.len);
+    try std.testing.expectEqual(@as(usize, 1), cache.salt_queue.count());
     try std.testing.expectEqual(@as(usize, 1), cache.salt_set.count());
 
     not_duplicate = try cache.maybeAdd(&salt_a, 100);
 
     try std.testing.expectEqual(false, not_duplicate);
-    try std.testing.expectEqual(@as(usize, 1), cache.salt_queue.len);
+    try std.testing.expectEqual(@as(usize, 1), cache.salt_queue.count());
     try std.testing.expectEqual(@as(usize, 1), cache.salt_set.count());
 
     cache.removeAfterTime(150);
-    try std.testing.expectEqual(@as(usize, 1), cache.salt_queue.len);
+    try std.testing.expectEqual(@as(usize, 1), cache.salt_queue.count());
     try std.testing.expectEqual(@as(usize, 1), cache.salt_set.count());
 
     cache.removeAfterTime(50);
@@ -115,10 +115,10 @@ test "salt cache" {
 
     not_duplicate = try cache.maybeAdd(&salt_b, 50);
     try std.testing.expectEqual(true, not_duplicate);
-    try std.testing.expectEqual(@as(usize, 2), cache.salt_queue.len);
+    try std.testing.expectEqual(@as(usize, 2), cache.salt_queue.count());
     try std.testing.expectEqual(@as(usize, 2), cache.salt_set.count());
 
     cache.removeAfterTime(0);
-    try std.testing.expectEqual(@as(usize, 0), cache.salt_queue.len);
+    try std.testing.expectEqual(@as(usize, 0), cache.salt_queue.count());
     try std.testing.expectEqual(@as(usize, 0), cache.salt_set.count());
 }

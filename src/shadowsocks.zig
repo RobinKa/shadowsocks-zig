@@ -13,11 +13,11 @@ test {
 
 test "FixedLengthRequestHeader - derive, encode, encrypt, decrypt, decode" {
     inline for (crypto.Methods) |TCrypto| {
-        var salt: [TCrypto.salt_length]u8 = try TCrypto.generateRandomSalt();
+        const salt: [TCrypto.salt_length]u8 = try TCrypto.generateRandomSalt();
         var key: [TCrypto.key_length]u8 = undefined;
         try std.os.getrandom(&key);
 
-        var session_subkey = TCrypto.deriveSessionSubkeyWithSalt(key, salt);
+        const session_subkey = TCrypto.deriveSessionSubkeyWithSalt(key, salt);
 
         var encode_encryptor: TCrypto.Encryptor = .{
             .key = session_subkey,

@@ -25,16 +25,15 @@ pub const FixedLengthRequestHeader = struct {
     length: u16,
 
     pub fn decode(encoded: []u8) !DecodeResult(@This()) {
-        var stream = std.io.fixedBufferStream(encoded);
-        var reader = stream.reader();
+        var reader = std.Io.Reader.fixed(encoded);
 
         return .{
             .result = .{
-                .type = try reader.readIntBig(u8),
-                .timestamp = try reader.readIntBig(u64),
-                .length = try reader.readIntBig(u16),
+                .type = try reader.takeInt(u8, .big),
+                .timestamp = try reader.takeInt(u64, .big),
+                .length = try reader.takeInt(u16, .big),
             },
-            .bytes_read = stream.pos,
+            .bytes_read = reader.seek,
         };
     }
 
@@ -67,46 +66,45 @@ pub const VariableLengthRequestHeader = struct {
     }
 
     pub fn decode(encoded: []u8, length: u16, allocator: std.mem.Allocator) !DecodeResultWithDeinit(@This()) {
-        var stream = std.io.fixedBufferStream(encoded);
-        var reader = stream.reader();
+        var reader = std.Io.Reader.fixed(encoded);
 
-        const start_pos = reader.context.pos;
+        const start_pos = reader.seek;
 
-        const address_type = try reader.readIntBig(u8);
-        var address: []u8 = add: {
+        const address_type = try reader.takeInt(u8, .big);
+        const address: []u8 = add: {
             switch (address_type) {
                 1 => {
-                    var addr: []u8 = try allocator.alloc(u8, 4);
+                    const addr: []u8 = try allocator.alloc(u8, 4);
                     errdefer allocator.free(addr);
-                    try reader.readNoEof(addr);
+                    try reader.readSliceAll(addr);
                     break :add addr;
                 },
                 3 => {
-                    const address_length = try reader.readIntBig(u8);
-                    var addr: []u8 = try allocator.alloc(u8, address_length);
+                    const address_length = try reader.takeInt(u8, .big);
+                    const addr: []u8 = try allocator.alloc(u8, address_length);
                     errdefer allocator.free(addr);
-                    try reader.readNoEof(addr);
+                    try reader.readSliceAll(addr);
                     break :add addr;
                 },
                 4 => {
-                    var addr: []u8 = try allocator.alloc(u8, 16);
+                    const addr: []u8 = try allocator.alloc(u8, 16);
                     errdefer allocator.free(addr);
-                    try reader.readNoEof(addr);
+                    try reader.readSliceAll(addr);
                     break :add addr;
                 },
                 else => unreachable,
             }
         };
 
-        const port = try reader.readIntBig(u16);
+        const port = try reader.takeInt(u16, .big);
 
-        const padding_length = try reader.readIntBig(u16);
-        try reader.skipBytes(padding_length, .{});
+        const padding_length = try reader.takeInt(u16, .big);
+        reader.toss(padding_length);
 
-        const remaining_length = length - (reader.context.pos - start_pos);
+        const remaining_length = length - (reader.seek - start_pos);
         var initial_payload = try allocator.alloc(u8, remaining_length);
         errdefer allocator.free(initial_payload);
-        try reader.readNoEof(initial_payload[0..remaining_length]);
+        try reader.readSliceAll(initial_payload[0..remaining_length]);
 
         return .{
             .result = .{
@@ -117,7 +115,7 @@ pub const VariableLengthRequestHeader = struct {
                 .initial_payload = initial_payload,
                 .allocator = allocator,
             },
-            .bytes_read = stream.pos,
+            .bytes_read = reader.seek,
         };
     }
 
@@ -128,7 +126,7 @@ pub const VariableLengthRequestHeader = struct {
         try writer.writeIntBig(u8, self.address_type);
 
         if (self.address_type == 3) {
-            try writer.writeIntBig(u8, @intCast(u8, self.address.len));
+            try writer.writeIntBig(u8, @as(u8, self.address.len));
         }
 
         _ = try writer.write(self.address);
@@ -172,15 +170,14 @@ pub fn FixedLengthResponseHeader(comptime salt_length: usize) type {
         }
 
         pub fn encode(self: @This(), encoded: []u8) !usize {
-            var stream = std.io.fixedBufferStream(encoded);
-            var writer = stream.writer();
+            var writer = std.Io.Writer.fixed(encoded);
 
-            try writer.writeIntBig(u8, self.type);
-            try writer.writeIntBig(u64, self.timestamp);
+            try writer.writeInt(u8, self.type, .big);
+            try writer.writeInt(u64, self.timestamp, .big);
             _ = try writer.write(&self.salt);
-            try writer.writeIntBig(u16, self.length);
+            try writer.writeInt(u16, self.length, .big);
 
-            return stream.pos;
+            return writer.end;
         }
     };
 }

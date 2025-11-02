@@ -12,8 +12,8 @@ const MitmData = struct {
 
     fn init(allocator: std.mem.Allocator) @This() {
         return .{
-            .sent = std.ArrayList(u8).init(allocator),
-            .received = std.ArrayList(u8).init(allocator),
+            .sent = std.ArrayList(u8).initCapacity(allocator, 1024),
+            .received = std.ArrayList(u8).initCapacity(allocator, 1024),
         };
     }
 
@@ -60,7 +60,7 @@ fn startMitmProxy(
                     break;
                 }
 
-                try mitm_data.sent.appendSlice(buffer[0..count]);
+                try mitm_data.sent.appendSlice(allocator, buffer[0..count]);
 
                 var sent: usize = 0;
                 while (sent < count) {
@@ -76,7 +76,7 @@ fn startMitmProxy(
                     break;
                 }
 
-                try mitm_data.received.appendSlice(buffer[0..count]);
+                try mitm_data.received.appendSlice(allocator, buffer[0..count]);
 
                 var sent: usize = 0;
                 while (sent < count) {
@@ -177,7 +177,7 @@ test "client send non-initial payload - Blake3Aes256Gcm" {
     defer client.deinit();
 
     const payload = "GET / HTTP/1.1\r\nHost: eu.httpbin.org\r\n\r\n";
-    var sent = try client.send(payload, std.testing.allocator);
+    const sent = try client.send(payload, std.testing.allocator);
     try std.testing.expectEqual(payload.len, sent);
 
     var recv_buffer: [1024]u8 = undefined;
@@ -223,7 +223,7 @@ test "MITM replay fails - Blake3Aes256Gcm" {
     defer client.deinit();
 
     const payload = "GET / HTTP/1.1\r\nHost: eu.httpbin.org\r\n\r\n";
-    var sent = try client.send(payload, std.testing.allocator);
+    const sent = try client.send(payload, std.testing.allocator);
     try std.testing.expectEqual(payload.len, sent);
 
     var recv_buffer: [1024]u8 = undefined;
